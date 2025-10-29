@@ -162,12 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     platformFilter.addEventListener('change', updateGameView);
     statusFilter.addEventListener('change', updateGameView);
-    // Debounce da busca por nome
-    function debounce(fn, delay = 250) {
-        let t;
-        return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
-    }
-    searchFilter.addEventListener('input', debounce(updateGameView, 250));
+    searchFilter.addEventListener('input', updateGameView);
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-games-btn');
@@ -288,14 +283,14 @@ function setupGameActionListeners() {
         const item = target.closest('.game-item');
         if (!item) return;
 
-        if (target.closest('.delete-btn')) {
+        if (target.classList.contains('delete-btn')) {
             item.remove();
             saveGamesToStorage(); // Salvar no localStorage após deletar
             updateGameView();
             showToast("Jogo apagado.", "info");
         }
 
-        if (target.closest('.edit-btn')) {
+        if (target.classList.contains('edit-btn')) {
             currentlyEditingGame = item;
             const { title, platform, status, rating } = item.dataset;
             
@@ -313,9 +308,8 @@ function setupGameActionListeners() {
             gameModal.show();
         }
 
-        if (target.closest('.view-api-details-btn')) {
-            const btn = target.closest('.view-api-details-btn');
-            const apiData = JSON.parse(btn.dataset.apiData);
+        if (target.classList.contains('view-api-details-btn')) {
+            const apiData = JSON.parse(target.dataset.apiData);
             showAPIGameDetails(apiData);
         }
     });

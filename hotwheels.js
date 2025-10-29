@@ -158,12 +158,7 @@ hwForm.addEventListener('submit', (event) => {
     document.getElementById('hw-modal').addEventListener('hidden.bs.modal', resetForm);
     
     seriesFilter.addEventListener('change', updateHwView);
-    // Debounce da busca por nome/numero
-    function debounce(fn, delay = 250) {
-        let t;
-        return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
-    }
-    searchFilter.addEventListener('input', debounce(updateHwView, 250));
+    searchFilter.addEventListener('input', updateHwView);
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-hw-btn');
@@ -259,14 +254,14 @@ function setupHwActionListeners() {
         const item = target.closest('.hw-item');
         if (!item) return;
 
-        if (target.closest('.delete-btn')) {
+        if (target.classList.contains('delete-btn')) {
             item.remove();
             saveCarsToStorage(); // Salvar no localStorage após deletar
             updateHwView();
             showToast("Carrinho apagado.", "info");
         }
 
-        if (target.closest('.edit-btn')) {
+        if (target.classList.contains('edit-btn')) {
             currentlyEditingHw = item;
             const { name, number, year, series } = item.dataset;
             document.getElementById('hw-name').value = name;
