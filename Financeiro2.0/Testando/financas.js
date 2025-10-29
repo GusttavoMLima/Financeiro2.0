@@ -260,7 +260,15 @@ document.addEventListener('DOMContentLoaded', () => {
     filterTransactions();
     monthFilter.addEventListener('change', filterTransactions);
     yearFilter.addEventListener('change', filterTransactions);
-    searchFilter.addEventListener('input', filterTransactions);
+    // Debounce para reduzir re-render a cada tecla digitada
+    function debounce(fn, delay = 250) {
+        let timer;
+        return function(...args) {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        };
+    }
+    searchFilter.addEventListener('input', debounce(filterTransactions, 250));
     setupFinanceActionListeners();
 });
 
@@ -291,45 +299,78 @@ function filterTransactions() {
         const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
         const transactionMonth = transactionDate.getMonth();
         const transactionYear = transactionDate.getFullYear();
-        const description = transaction.dataset.description.toLowerCase();
+        const descriptionLower = transaction.dataset.description.toLowerCase();
         const isMonthMatch = transactionMonth === selectedMonth && transactionYear === selectedYear;
-        const isSearchMatch = searchTerm === '' || description.includes(searchTerm);
+        const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm);
         if (isMonthMatch && isSearchMatch) {
             transaction.style.display = 'block';
-            const { amount, type, date, category, description } = transaction.dataset;
+            const { amount, type, date, category } = transaction.dataset;
+            const descriptionRaw = transaction.dataset.description;
             const numAmount = parseFloat(amount);
-            
-            // Criar interface visual melhorada
+
+            // Renderização segura sem innerHTML
             const formattedDate = new Date(date).toLocaleDateString('pt-BR');
             const formattedAmount = numAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-            const typeClass = type === 'Receita' ? 'receita' : 'despesa';
             const typeIcon = type === 'Receita' ? 'bi-arrow-up-circle-fill text-success' : 'bi-arrow-down-circle-fill text-danger';
-            
-            transaction.innerHTML = `
-                <div class="d-flex w-100 justify-content-between align-items-center">
-                    <div class="d-flex align-items-center">
-                        <i class="bi ${typeIcon} me-3 fs-4"></i>
-                        <div>
-                            <h6 class="mb-1 fw-bold">${description}</h6>
-                            <small class="text-muted">
-                                <i class="bi bi-calendar3 me-1"></i>${formattedDate} • 
-                                <i class="bi bi-tag me-1"></i>${category}
-                            </small>
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="fw-bold fs-5 ${type === 'Receita' ? 'text-success' : 'text-danger'}">${formattedAmount}</span>
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-outline-primary edit-btn" title="Editar">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-btn" title="Excluir">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
+
+            // Limpar e construir DOM de forma segura
+            transaction.textContent = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'd-flex w-100 justify-content-between align-items-center';
+
+            const left = document.createElement('div');
+            left.className = 'd-flex align-items-center';
+            const icon = document.createElement('i');
+            icon.className = `bi ${typeIcon} me-3 fs-4`;
+            const leftTextWrap = document.createElement('div');
+            const title = document.createElement('h6');
+            title.className = 'mb-1 fw-bold';
+            title.textContent = descriptionRaw;
+            const meta = document.createElement('small');
+            meta.className = 'text-muted';
+            const calIcon = document.createElement('i');
+            calIcon.className = 'bi bi-calendar3 me-1';
+            const tagIcon = document.createElement('i');
+            tagIcon.className = 'bi bi-tag me-1';
+            meta.appendChild(calIcon);
+            meta.appendChild(document.createTextNode(formattedDate + ' • '));
+            meta.appendChild(tagIcon);
+            meta.appendChild(document.createTextNode(category));
+            leftTextWrap.appendChild(title);
+            leftTextWrap.appendChild(meta);
+            left.appendChild(icon);
+            left.appendChild(leftTextWrap);
+
+            const right = document.createElement('div');
+            right.className = 'd-flex align-items-center gap-2';
+            const valueSpan = document.createElement('span');
+            valueSpan.className = `fw-bold fs-5 ${type === 'Receita' ? 'text-success' : 'text-danger'}`;
+            valueSpan.textContent = formattedAmount;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group';
+            btnGroup.setAttribute('role', 'group');
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-primary edit-btn';
+            editBtn.title = 'Editar';
+            editBtn.setAttribute('aria-label', 'Editar transação');
+            const editIcon = document.createElement('i');
+            editIcon.className = 'bi bi-pencil';
+            editBtn.appendChild(editIcon);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+            delBtn.title = 'Excluir';
+            delBtn.setAttribute('aria-label', 'Excluir transação');
+            const delIcon = document.createElement('i');
+            delIcon.className = 'bi bi-trash';
+            delBtn.appendChild(delIcon);
+            btnGroup.appendChild(editBtn);
+            btnGroup.appendChild(delBtn);
+            right.appendChild(valueSpan);
+            right.appendChild(btnGroup);
+
+            wrapper.appendChild(left);
+            wrapper.appendChild(right);
+            transaction.appendChild(wrapper);
             
             if (type === 'Receita') {
                 monthlyIncome += numAmount;
@@ -422,13 +463,13 @@ function setupFinanceActionListeners() {
         const item = target.closest('.list-group-item');
         if (!item) return;
 
-        if (target.classList.contains('delete-btn')) {
+        if (target.closest('.delete-btn')) {
             item.remove();
             saveTransactions(); // Salvar no localStorage após deletar
             filterTransactions();
             showToast("Transação apagada.", "info");
         }
-        if (target.classList.contains('edit-btn')) {
+        if (target.closest('.edit-btn')) {
             currentlyEditingItem = item;
             const { description, amount, type, date, category } = item.dataset;
             document.getElementById('finance-description').value = description;
@@ -457,12 +498,15 @@ function exportData() {
         return;
     }
     
-    // Criar CSV
-    let csvContent = "Data,Descrição,Valor,Tipo,Categoria\n";
+    // Criar CSV (valor bruto + valor formatado)
+    let csvContent = "Data,Descrição,Valor,ValorFormatado,Tipo,Categoria\n";
     transactions.forEach(transaction => {
-        const date = new Date(transaction.date).toLocaleDateString('pt-BR');
-        const amount = transaction.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-        csvContent += `${date},"${transaction.description}",${amount},${transaction.type},${transaction.category}\n`;
+        const dateISO = transaction.date; // formato YYYY-MM-DD para facilitar planilhas
+        const amountRaw = Number(transaction.amount);
+        const amountFormatted = amountRaw.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        const desc = String(transaction.description).replaceAll('"', '""');
+        const cat = String(transaction.category).replaceAll('"', '""');
+        csvContent += `${dateISO},"${desc}",${amountRaw},${amountFormatted},${transaction.type},"${cat}"\n`;
     });
     
     // Download do arquivo
@@ -484,8 +528,9 @@ function createRecurringTransactions(transaction, frequency) {
     const baseDate = new Date(transaction.date);
     const transactions = [];
     
-    // Criar transações para os próximos 12 meses
-    for (let i = 1; i <= 12; i++) {
+    // Criar transações futuras de acordo com a frequência
+    const iterations = frequency === 'weekly' ? 12 : frequency === 'monthly' ? 12 : 2; // yearly: 2 anos
+    for (let i = 1; i <= iterations; i++) {
         const newDate = new Date(baseDate);
         
         switch (frequency) {
