@@ -15,7 +15,8 @@ let budgets = {}; // Estrutura nova: { 'YYYY-MM': { Categoria: valor } } com com
 const STORAGE_KEYS = {
     TRANSACTIONS: 'finance_transactions',
     BUDGETS: 'finance_budgets',
-    SETTINGS: 'finance_settings'
+    SETTINGS: 'finance_settings',
+    RULES: 'finance_rules'
 };
 
 // Funções de localStorage
@@ -128,6 +129,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalTitle = document.getElementById('modal-title');
     const saveBudgetsBtn = document.getElementById('save-budgets-btn');
     const budgetsForm = document.getElementById('budgets-form');
+    const selectAllCheckbox = document.getElementById('select-all');
+    const bulkDeleteBtn = document.getElementById('bulk-delete');
+    const bulkCategorySelect = document.getElementById('bulk-category');
+    const bulkApplyBtn = document.getElementById('bulk-apply');
 
     // Define a data atual como padrão no formulário de transação
     dateInput.value = new Date().toISOString().split('T')[0];
@@ -145,6 +150,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-data-btn');
     if (exportBtn) exportBtn.addEventListener('click', exportData);
+    const exportReportBtn = document.getElementById('export-report-btn');
+    if (exportReportBtn) exportReportBtn.addEventListener('click', exportMonthlyReport);
     const importBtn = document.getElementById('import-data-btn');
     const importInput = document.getElementById('import-file-input');
     if (importBtn && importInput) {
@@ -246,6 +253,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 description, amount, type, date, category,
                 id: Date.now() + Math.random()
             };
+            // Aplicar regras automáticas de categorização
+            const auto = loadFromStorage(STORAGE_KEYS.RULES, []);
+            const match = (auto || []).find(r => r && r.keyword && description.toLowerCase().includes(String(r.keyword).toLowerCase()));
+            if (match && match.category) {
+                transactionData.category = match.category;
+            }
             
             // Adicionar transação principal
             const listItem = document.createElement('li'); 
@@ -254,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
             listItem.dataset.amount = amount;
             listItem.dataset.type = type; 
             listItem.dataset.date = date; 
-            listItem.dataset.category = category;
+            listItem.dataset.category = transactionData.category;
             listItem.dataset.id = transactionData.id;
             financeList.appendChild(listItem);
             
@@ -308,6 +321,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     searchFilter.addEventListener('input', debounce(filterTransactions, 250));
     setupFinanceActionListeners();
+
+    // Seleção em massa
+    function updateBulkState() {
+        const anyChecked = !!document.querySelector('.transaction-item input[type="checkbox"]:checked');
+        bulkDeleteBtn.disabled = !anyChecked;
+        bulkApplyBtn.disabled = !anyChecked || !bulkCategorySelect.value;
+    }
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', () => {
+            document.querySelectorAll('.transaction-item input[type="checkbox"]').forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateBulkState();
+        });
+    }
+    if (bulkCategorySelect) bulkCategorySelect.addEventListener('change', updateBulkState);
+    if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', () => {
+        const checked = Array.from(document.querySelectorAll('.transaction-item input[type="checkbox"]:checked')).map(cb => cb.closest('.transaction-item'));
+        if (checked.length === 0) return;
+        checked.forEach(item => item.remove());
+        saveTransactions();
+        filterTransactions();
+        showToast(`${checked.length} transação(ões) excluída(s).`, 'info');
+    });
+    if (bulkApplyBtn) bulkApplyBtn.addEventListener('click', () => {
+        const newCat = bulkCategorySelect.value;
+        if (!newCat) return;
+        const checked = Array.from(document.querySelectorAll('.transaction-item input[type="checkbox"]:checked')).map(cb => cb.closest('.transaction-item'));
+        checked.forEach(item => item.dataset.category = newCat);
+        saveTransactions();
+        filterTransactions();
+        showToast(`Categoria aplicada em ${checked.length} item(ns).`, 'success');
+    });
 });
 
 function filterTransactions() {
@@ -382,6 +426,17 @@ function filterTransactions() {
 
             const left = document.createElement('div');
             left.className = 'd-flex align-items-center';
+            const check = document.createElement('input');
+            check.type = 'checkbox';
+            check.className = 'form-check-input me-2';
+            check.addEventListener('change', () => {
+                const anyChecked = !!document.querySelector('.transaction-item input[type="checkbox"]:checked');
+                const bulkDeleteBtn = document.getElementById('bulk-delete');
+                const bulkApplyBtn = document.getElementById('bulk-apply');
+                const bulkCategorySelect = document.getElementById('bulk-category');
+                if (bulkDeleteBtn) bulkDeleteBtn.disabled = !anyChecked;
+                if (bulkApplyBtn) bulkApplyBtn.disabled = !anyChecked || !bulkCategorySelect?.value;
+            });
             const icon = document.createElement('i');
             icon.className = `bi ${typeIcon} me-3 fs-4`;
             const leftTextWrap = document.createElement('div');
@@ -400,6 +455,7 @@ function filterTransactions() {
             meta.appendChild(document.createTextNode(category));
             leftTextWrap.appendChild(title);
             leftTextWrap.appendChild(meta);
+            left.appendChild(check);
             left.appendChild(icon);
             left.appendChild(leftTextWrap);
 
@@ -633,6 +689,44 @@ function exportData() {
     document.body.removeChild(link);
     
     showToast("Dados exportados com sucesso!", "success");
+}
+
+// Relatório mensal consolidado (CSV por categoria e totais)
+function exportMonthlyReport() {
+    const monthFilter = document.getElementById('month-filter');
+    const yearFilter = document.getElementById('year-filter');
+    const selectedMonth = parseInt(monthFilter.value);
+    const selectedYear = parseInt(yearFilter.value);
+    const items = Array.from(document.querySelectorAll('#finance-list .transaction-item'));
+    const totals = { Receita: 0, Despesa: 0 };
+    const byCategory = {};
+    items.forEach(it => {
+        const d = new Date(it.dataset.date + 'T00:00:00');
+        if (d.getMonth() !== selectedMonth || d.getFullYear() !== selectedYear) return;
+        const amt = parseFloat(it.dataset.amount);
+        const type = it.dataset.type;
+        const cat = it.dataset.category || 'Outros';
+        if (!isNaN(amt)) {
+            totals[type] = (totals[type] || 0) + amt;
+            if (type === 'Despesa') byCategory[cat] = (byCategory[cat] || 0) + amt;
+        }
+    });
+    const saldo = (totals['Receita'] || 0) - (totals['Despesa'] || 0);
+    let csv = `Relatório;${selectedYear}-${String(selectedMonth+1).padStart(2,'0')}\n`;
+    csv += `Receitas;${totals['Receita']||0}\nDespesas;${totals['Despesa']||0}\nSaldo;${saldo}\n\n`;
+    csv += `Categoria;TotalDespesa\n`;
+    Object.keys(byCategory).sort((a,b)=>(byCategory[b]-byCategory[a])).forEach(cat=>{
+        csv += `${cat};${byCategory[cat]}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `relatorio_${selectedYear}-${String(selectedMonth+1).padStart(2,'0')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Relatório mensal exportado.', 'success');
 }
 
 // Importar transações de JSON
