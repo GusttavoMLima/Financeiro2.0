@@ -8,7 +8,7 @@
  * @param {string} message - A mensagem a ser exibida.
  * @param {string} type - O tipo de notificação ('success', 'danger', 'warning', 'info').
  */
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', options) {
     const toastContainer = document.getElementById('toast-container');
     if (!toastContainer) return;
 
@@ -30,20 +30,31 @@ function showToast(message, type = 'info') {
     toastElement.setAttribute('aria-atomic', 'true');
 
     toastElement.innerHTML = `
-        <div class="d-flex">
-            <div class="toast-body">
+        <div class="d-flex align-items-center">
+            <div class="toast-body flex-grow-1">
                 <i class="bi ${details.icon} me-2"></i>
                 ${message}
             </div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            ${options && options.actionText ? `<button type="button" class="btn btn-sm btn-light me-2 toast-action">${options.actionText}</button>` : ''}
+            <button type="button" class="btn-close ${details.color.includes('text-bg-') ? 'btn-close-white' : ''} me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>
     `;
 
     toastContainer.appendChild(toastElement);
 
     const toast = new bootstrap.Toast(toastElement, {
-        delay: 3000 // O toast desaparece após 3 segundos
+        delay: options && typeof options.delay === 'number' ? options.delay : 3000
     });
+
+    if (options && typeof options.onAction === 'function') {
+        const actionBtn = toastElement.querySelector('.toast-action');
+        if (actionBtn) {
+            actionBtn.addEventListener('click', () => {
+                try { options.onAction(); } catch (_) {}
+                toast.hide();
+            });
+        }
+    }
 
     // Remove o elemento do HTML depois de desaparecer para não acumular
     toastElement.addEventListener('hidden.bs.toast', () => {

@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const monthFilter = document.getElementById('month-filter');
     const yearFilter = document.getElementById('year-filter');
     const searchFilter = document.getElementById('search-filter');
+    const sortFilter = document.getElementById('sort-filter');
     const submitButton = document.getElementById('submit-btn');
     const modalTitle = document.getElementById('modal-title');
     const saveBudgetsBtn = document.getElementById('save-budgets-btn');
@@ -260,6 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filterTransactions();
     monthFilter.addEventListener('change', filterTransactions);
     yearFilter.addEventListener('change', filterTransactions);
+    if (sortFilter) sortFilter.addEventListener('change', filterTransactions);
     // Debounce para reduzir re-render a cada tecla digitada
     function debounce(fn, delay = 250) {
         let timer;
@@ -282,7 +284,7 @@ function filterTransactions() {
     const selectedMonth = parseInt(monthFilter.value);
     const selectedYear = parseInt(yearFilter.value);
     const searchTerm = searchFilter.value.toLowerCase();
-    const transactions = financeList.querySelectorAll('.list-group-item');
+    const transactions = Array.from(financeList.querySelectorAll('.list-group-item'));
     const monthlyIncomeEl = document.getElementById('monthly-income');
     const monthlyExpensesEl = document.getElementById('monthly-expenses');
     const monthlyBalanceEl = document.getElementById('monthly-balance');
@@ -295,24 +297,45 @@ function filterTransactions() {
     const previousMonth = previousMonthDate.getMonth();
     const previousYear = previousMonthDate.getFullYear();
 
-    transactions.forEach(transaction => {
+    const sortMode = document.getElementById('sort-filter')?.value || 'date_desc';
+    const sorted = transactions.sort((a, b) => {
+        const ad = new Date(a.dataset.date + 'T00:00:00').getTime();
+        const bd = new Date(b.dataset.date + 'T00:00:00').getTime();
+        const aa = parseFloat(a.dataset.amount);
+        const ba = parseFloat(b.dataset.amount);
+        switch (sortMode) {
+            case 'date_asc':
+                return ad - bd;
+            case 'amount_desc':
+                return ba - aa;
+            case 'amount_asc':
+                return aa - ba;
+            case 'date_desc':
+            default:
+                return bd - ad;
+        }
+    });
+
+    sorted.forEach(transaction => {
         const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
         const transactionMonth = transactionDate.getMonth();
         const transactionYear = transactionDate.getFullYear();
         const descriptionLower = transaction.dataset.description.toLowerCase();
+        const categoryLower = (transaction.dataset.category || '').toLowerCase();
+        const typeLower = (transaction.dataset.type || '').toLowerCase();
         const isMonthMatch = transactionMonth === selectedMonth && transactionYear === selectedYear;
-        const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm);
+        const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm) || categoryLower.includes(searchTerm) || typeLower.includes(searchTerm);
         if (isMonthMatch && isSearchMatch) {
             transaction.style.display = 'block';
             const { amount, type, date, category } = transaction.dataset;
             const descriptionRaw = transaction.dataset.description;
             const numAmount = parseFloat(amount);
-
+            
             // Renderização segura sem innerHTML
             const formattedDate = new Date(date).toLocaleDateString('pt-BR');
             const formattedAmount = numAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
             const typeIcon = type === 'Receita' ? 'bi-arrow-up-circle-fill text-success' : 'bi-arrow-down-circle-fill text-danger';
-
+            
             // Limpar e construir DOM de forma segura
             transaction.textContent = '';
             const wrapper = document.createElement('div');
@@ -371,6 +394,8 @@ function filterTransactions() {
             wrapper.appendChild(left);
             wrapper.appendChild(right);
             transaction.appendChild(wrapper);
+            // Reposicionar conforme ordenação
+            financeList.appendChild(transaction);
             
             if (type === 'Receita') {
                 monthlyIncome += numAmount;
@@ -409,6 +434,12 @@ function filterTransactions() {
     const sortedCategories = Array.from(allCategoriesInView).sort((a, b) => (categoryTotals[b] || 0) - (categoryTotals[a] || 0));
 
     if (sortedCategories.length > 0) {
+        // cálculo para previsão mensal simples
+        const now = new Date();
+        const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+        const today = selectedYear === now.getFullYear() && selectedMonth === now.getMonth() ? now.getDate() : daysInMonth;
+        const daysLeft = Math.max(0, daysInMonth - today);
+
         sortedCategories.forEach(category => {
             const total = categoryTotals[category] || 0;
             const listItem = document.createElement('li');
@@ -422,8 +453,13 @@ function filterTransactions() {
                 if (percentage >= 100) bgColor = 'bg-danger';
                 const totalFormatted = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
                 const budgetFormatted = budget.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const spentPerDay = today > 0 ? (total / today) : 0;
+                const projected = total + spentPerDay * daysLeft;
+                const projectedFormatted = projected.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const remaining = Math.max(0, budget - total);
+                const remainingFormatted = remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
                 progressHtml = `
-                    <small class="text-muted d-block">${totalFormatted} de ${budgetFormatted}</small>
+                    <small class="text-muted d-block">${totalFormatted} de ${budgetFormatted} • Restante: ${remainingFormatted} • Prev.: ${projectedFormatted}</small>
                     <div class="progress mt-1 budget-progress" role="progressbar">
                         <div class="progress-bar ${bgColor}" style="width: ${percentage}%"></div>
                     </div>`;
@@ -464,10 +500,37 @@ function setupFinanceActionListeners() {
         if (!item) return;
 
         if (target.closest('.delete-btn')) {
+            // guardar para desfazer
+            const deleted = {
+                id: item.dataset.id,
+                description: item.dataset.description,
+                amount: item.dataset.amount,
+                type: item.dataset.type,
+                date: item.dataset.date,
+                category: item.dataset.category
+            };
             item.remove();
-            saveTransactions(); // Salvar no localStorage após deletar
+            saveTransactions();
             filterTransactions();
-            showToast("Transação apagada.", "info");
+            showToast("Transação apagada.", "info", {
+                actionText: 'Desfazer',
+                delay: 6000,
+                onAction: () => {
+                    // recriar item
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item transaction-item';
+                    li.dataset.id = deleted.id || (Date.now() + Math.random());
+                    li.dataset.description = deleted.description;
+                    li.dataset.amount = deleted.amount;
+                    li.dataset.type = deleted.type;
+                    li.dataset.date = deleted.date;
+                    li.dataset.category = deleted.category;
+                    document.getElementById('finance-list').appendChild(li);
+                    saveTransactions();
+                    filterTransactions();
+                    showToast('Transação restaurada.', 'success');
+                }
+            });
         }
         if (target.closest('.edit-btn')) {
             currentlyEditingItem = item;

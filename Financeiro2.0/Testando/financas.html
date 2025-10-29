@@ -67,7 +67,15 @@
                             </div>
                             <div class="flex-grow-1">
                                 <input type="search" id="search-filter" class="form-control form-control-sm"
-                                    placeholder="Buscar por descrição...">
+                                    placeholder="Buscar por descrição, categoria ou tipo...">
+                            </div>
+                            <div>
+                                <select id="sort-filter" class="form-select form-select-sm">
+                                    <option value="date_desc">Data ↓</option>
+                                    <option value="date_asc">Data ↑</option>
+                                    <option value="amount_desc">Valor ↓</option>
+                                    <option value="amount_asc">Valor ↑</option>
+                                </select>
                             </div>
                         </div>
                         <ul id="finance-list" class="list-group"></ul>
