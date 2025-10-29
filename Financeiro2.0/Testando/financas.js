@@ -9,7 +9,7 @@ let transactionModal = null;
 let budgetsModal = null;
 
 // Objeto para guardar os orçamentos com persistência
-let budgets = {}; // Ex: { "Alimentação": 500, "Lazer": 200 }
+let budgets = {}; // Estrutura nova: { 'YYYY-MM': { Categoria: valor } } com compatibilidade legado
 
 // Sistema de localStorage para persistência de dados
 const STORAGE_KEYS = {
@@ -41,6 +41,12 @@ function loadFromStorage(key, defaultValue = null) {
 }
 
 // Carregar dados salvos ao inicializar
+function getCurrentPeriodKey(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+}
+
 function loadSavedData() {
     const savedTransactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, []);
     const savedBudgets = loadFromStorage(STORAGE_KEYS.BUDGETS, {});
@@ -62,7 +68,13 @@ function loadSavedData() {
     }
     
     // Carregar orçamentos salvos
-    budgets = savedBudgets;
+    // Migração de orçamento: se veio no formato legado (mapa direto de categorias), mover para o mês atual
+    const periodKey = getCurrentPeriodKey();
+    if (savedBudgets && !savedBudgets[periodKey] && Object.values(savedBudgets).every(v => typeof v === 'number')) {
+        budgets = { [periodKey]: savedBudgets };
+    } else {
+        budgets = savedBudgets || {};
+    }
 }
 
 // Salvar transações
@@ -132,8 +144,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-data-btn');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', exportData);
+    if (exportBtn) exportBtn.addEventListener('click', exportData);
+    const importBtn = document.getElementById('import-data-btn');
+    const importInput = document.getElementById('import-file-input');
+    if (importBtn && importInput) {
+        importBtn.addEventListener('click', () => importInput.click());
+        importInput.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                if (file.name.toLowerCase().endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importTransactionsFromJSON(data);
+                } else {
+                    importTransactionsFromCSV(text);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Falha ao importar arquivo.', 'danger');
+            } finally {
+                importInput.value = '';
+            }
+        });
     }
 
     function populateFilters() {
@@ -167,8 +200,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function populateBudgetsForm() {
         const categories = ["Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", "Trabalho", "Outros"];
         budgetsForm.innerHTML = '';
+        const currentPeriod = getCurrentPeriodKey(new Date(parseInt(yearFilter.value), parseInt(monthFilter.value)));
+        const periodBudgets = budgets[currentPeriod] || {};
         categories.forEach(category => {
-            const value = budgets[category] || '';
+            const value = periodBudgets[category] || '';
             const formRow = `<div class="input-group mb-2"><span class="input-group-text" style="width: 120px;">${category}</span><input type="number" class="form-control" data-category="${category}" value="${value}" placeholder="0" min="0"></div>`;
             budgetsForm.insertAdjacentHTML('beforeend', formRow);
         });
@@ -178,12 +213,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     saveBudgetsBtn.addEventListener('click', () => {
         const inputs = budgetsForm.querySelectorAll('input');
-        budgets = {}; // Limpa os orçamentos antigos antes de salvar
+        const currentPeriod = getCurrentPeriodKey(new Date(parseInt(yearFilter.value), parseInt(monthFilter.value)));
+        budgets[currentPeriod] = {}; // sobrescreve somente o período atual
         inputs.forEach(input => {
             const category = input.dataset.category;
             const amount = parseFloat(input.value);
             if (amount > 0) {
-                budgets[category] = amount;
+                budgets[currentPeriod][category] = amount;
             }
         });
         saveBudgets(); // Salvar no localStorage
@@ -284,7 +320,9 @@ function filterTransactions() {
     const selectedMonth = parseInt(monthFilter.value);
     const selectedYear = parseInt(yearFilter.value);
     const searchTerm = searchFilter.value.toLowerCase();
-    const transactions = Array.from(financeList.querySelectorAll('.list-group-item'));
+    // Remover cabeçalhos anteriores
+    Array.from(financeList.querySelectorAll('.transaction-header')).forEach(h => h.remove());
+    const transactions = Array.from(financeList.querySelectorAll('.list-group-item.transaction-item'));
     const monthlyIncomeEl = document.getElementById('monthly-income');
     const monthlyExpensesEl = document.getElementById('monthly-expenses');
     const monthlyBalanceEl = document.getElementById('monthly-balance');
@@ -316,6 +354,7 @@ function filterTransactions() {
         }
     });
 
+    let lastHeaderDate = '';
     sorted.forEach(transaction => {
         const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
         const transactionMonth = transactionDate.getMonth();
@@ -394,6 +433,14 @@ function filterTransactions() {
             wrapper.appendChild(left);
             wrapper.appendChild(right);
             transaction.appendChild(wrapper);
+            // Inserir cabeçalho por data se mudou
+            if (date !== lastHeaderDate) {
+                lastHeaderDate = date;
+                const header = document.createElement('li');
+                header.className = 'list-group-item transaction-header bg-light-subtle text-muted fw-semibold';
+                header.textContent = new Date(date).toLocaleDateString('pt-BR');
+                financeList.appendChild(header);
+            }
             // Reposicionar conforme ordenação
             financeList.appendChild(transaction);
             
@@ -430,7 +477,9 @@ function filterTransactions() {
     
     categoryList.innerHTML = '';
     const allCategoriesInView = new Set(Object.keys(categoryTotals));
-    Object.keys(budgets).forEach(cat => allCategoriesInView.add(cat));
+    const currentPeriodKey = getCurrentPeriodKey(new Date(selectedYear, selectedMonth));
+    const periodBudgets = (budgets && budgets[currentPeriodKey]) || {};
+    Object.keys(periodBudgets).forEach(cat => allCategoriesInView.add(cat));
     const sortedCategories = Array.from(allCategoriesInView).sort((a, b) => (categoryTotals[b] || 0) - (categoryTotals[a] || 0));
 
     if (sortedCategories.length > 0) {
@@ -444,7 +493,7 @@ function filterTransactions() {
             const total = categoryTotals[category] || 0;
             const listItem = document.createElement('li');
             listItem.className = 'list-group-item';
-            const budget = budgets[category];
+            const budget = periodBudgets[category];
             let progressHtml = '';
             if (budget) {
                 const percentage = Math.min((total / budget) * 100, 100);
@@ -586,6 +635,102 @@ function exportData() {
     showToast("Dados exportados com sucesso!", "success");
 }
 
+// Importar transações de JSON
+function importTransactionsFromJSON(jsonData) {
+    if (!Array.isArray(jsonData)) {
+        showToast('Formato JSON inválido. Use uma lista de transações.', 'warning');
+        return;
+    }
+    const financeList = document.getElementById('finance-list');
+    jsonData.forEach(t => {
+        if (!t.date || !t.description || !t.category || typeof t.amount !== 'number' || !t.type) return;
+        const li = document.createElement('li');
+        li.className = 'list-group-item transaction-item';
+        li.dataset.id = t.id || (Date.now() + Math.random());
+        li.dataset.description = t.description;
+        li.dataset.amount = String(t.amount);
+        li.dataset.type = t.type;
+        li.dataset.date = t.date;
+        li.dataset.category = t.category;
+        financeList.appendChild(li);
+    });
+    saveTransactions();
+    filterTransactions();
+    showToast('Transações importadas (JSON).', 'success');
+}
+
+// Importar transações de CSV (espera cabeçalho semelhante ao export)
+function importTransactionsFromCSV(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length <= 1) { showToast('CSV vazio.', 'warning'); return; }
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const idxDate = header.indexOf('data') >= 0 ? header.indexOf('data') : header.indexOf('date');
+    const idxDesc = header.indexOf('descrição') >= 0 ? header.indexOf('descrição') : header.indexOf('descricao');
+    const idxAmountRaw = header.indexOf('valor');
+    const idxType = header.indexOf('tipo');
+    const idxCat = header.indexOf('categoria');
+    if (idxDate < 0 || idxDesc < 0 || idxAmountRaw < 0 || idxType < 0 || idxCat < 0) {
+        showToast('Cabeçalho do CSV não reconhecido.', 'warning');
+        return;
+    }
+    const financeList = document.getElementById('finance-list');
+    for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]);
+        if (!cols || cols.length < header.length) continue;
+        const dateStr = cols[idxDate];
+        const desc = stripQuotes(cols[idxDesc]);
+        const type = cols[idxType];
+        const cat = stripQuotes(cols[idxCat]);
+        const amount = Number(cols[idxAmountRaw].replace(/\./g, '').replace(',', '.'));
+        if (!dateStr || !desc || !cat || !type || isNaN(amount)) continue;
+        const li = document.createElement('li');
+        li.className = 'list-group-item transaction-item';
+        li.dataset.id = Date.now() + Math.random();
+        li.dataset.description = desc;
+        li.dataset.amount = String(amount);
+        li.dataset.type = type;
+        li.dataset.date = normalizeDate(dateStr);
+        li.dataset.category = cat;
+        financeList.appendChild(li);
+    }
+    saveTransactions();
+    filterTransactions();
+    showToast('Transações importadas (CSV).', 'success');
+}
+
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+            else { inQuotes = !inQuotes; }
+        } else if (ch === ',' && !inQuotes) {
+            result.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    result.push(current);
+    return result.map(s => s.trim());
+}
+
+function stripQuotes(s) { return s?.replace(/^"|"$/g, '') || s; }
+
+function normalizeDate(s) {
+    // aceita YYYY-MM-DD ou DD/MM/YYYY
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+        const d = m[1].padStart(2, '0');
+        const mo = m[2].padStart(2, '0');
+        return `${m[3]}-${mo}-${d}`;
+    }
+    return new Date(s).toISOString().split('T')[0];
+}
 // Função para criar transações recorrentes
 function createRecurringTransactions(transaction, frequency) {
     const baseDate = new Date(transaction.date);
