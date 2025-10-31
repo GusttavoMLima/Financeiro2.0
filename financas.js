@@ -9,13 +9,14 @@ let transactionModal = null;
 let budgetsModal = null;
 
 // Objeto para guardar os orçamentos com persistência
-let budgets = {}; // Ex: { "Alimentação": 500, "Lazer": 200 }
+let budgets = {}; // Estrutura nova: { 'YYYY-MM': { Categoria: valor } } com compatibilidade legado
 
 // Sistema de localStorage para persistência de dados
 const STORAGE_KEYS = {
     TRANSACTIONS: 'finance_transactions',
     BUDGETS: 'finance_budgets',
-    SETTINGS: 'finance_settings'
+    SETTINGS: 'finance_settings',
+    RULES: 'finance_rules'
 };
 
 // Funções de localStorage
@@ -41,10 +42,16 @@ function loadFromStorage(key, defaultValue = null) {
 }
 
 // Carregar dados salvos ao inicializar
+function getCurrentPeriodKey(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+}
+
 function loadSavedData() {
     const savedTransactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, []);
     const savedBudgets = loadFromStorage(STORAGE_KEYS.BUDGETS, {});
-    
+
     // Carregar transações salvas
     if (savedTransactions.length > 0) {
         const financeList = document.getElementById('finance-list');
@@ -58,11 +65,23 @@ function loadSavedData() {
             listItem.dataset.category = transaction.category;
             listItem.dataset.id = transaction.id;
             financeList.appendChild(listItem);
+
+            if (transaction.isInstallment) {
+                listItem.dataset.isInstallment = transaction.isInstallment;
+                listItem.dataset.installmentNumber = transaction.installmentNumber;
+                listItem.dataset.totalInstallments = transaction.totalInstallments;
+            }
         });
     }
-    
+
     // Carregar orçamentos salvos
-    budgets = savedBudgets;
+    // Migração de orçamento: se veio no formato legado (mapa direto de categorias), mover para o mês atual
+    const periodKey = getCurrentPeriodKey();
+    if (savedBudgets && !savedBudgets[periodKey] && Object.values(savedBudgets).every(v => typeof v === 'number')) {
+        budgets = { [periodKey]: savedBudgets };
+    } else {
+        budgets = savedBudgets || {};
+    }
 }
 
 // Salvar transações
@@ -70,7 +89,7 @@ function saveTransactions() {
     const transactions = [];
     const financeList = document.getElementById('finance-list');
     const items = financeList.querySelectorAll('.transaction-item');
-    
+
     items.forEach(item => {
         transactions.push({
             id: item.dataset.id || Date.now() + Math.random(),
@@ -80,8 +99,14 @@ function saveTransactions() {
             date: item.dataset.date,
             category: item.dataset.category
         });
+        if (item.dataset.isInstallment === 'true') {
+            transactionData.isInstallment = true;
+            transactionData.installmentNumber = item.dataset.installmentNumber;
+            transactionData.totalInstallments = item.dataset.totalInstallments;
+        }
+        transactions.push(transactionData);
     });
-    
+
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, transactions);
 }
 
@@ -111,10 +136,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const monthFilter = document.getElementById('month-filter');
     const yearFilter = document.getElementById('year-filter');
     const searchFilter = document.getElementById('search-filter');
+    const sortFilter = document.getElementById('sort-filter');
     const submitButton = document.getElementById('submit-btn');
     const modalTitle = document.getElementById('modal-title');
     const saveBudgetsBtn = document.getElementById('save-budgets-btn');
     const budgetsForm = document.getElementById('budgets-form');
+    const selectAllCheckbox = document.getElementById('select-all');
+    const bulkDeleteBtn = document.getElementById('bulk-delete');
+    const bulkCategorySelect = document.getElementById('bulk-category');
+    const bulkApplyBtn = document.getElementById('bulk-apply');
 
     // Define a data atual como padrão no formulário de transação
     dateInput.value = new Date().toISOString().split('T')[0];
@@ -122,17 +152,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // Controle de transações recorrentes
     const recurringCheckbox = document.getElementById('recurring-checkbox');
     const recurringOptions = document.getElementById('recurring-options');
-    
+    const installmentTotal = document.getElementById('installment-total');
+
     if (recurringCheckbox && recurringOptions) {
         recurringCheckbox.addEventListener('change', () => {
             recurringOptions.style.display = recurringCheckbox.checked ? 'block' : 'none';
+            if (recurringCheckbox.checked) {
+                typeInput.value = 'Despesa';
+                typeInput.disabled = true;
+            } else {
+                typeInput.disabled = false;
+            }
         });
     }
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-data-btn');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', exportData);
+    if (exportBtn) exportBtn.addEventListener('click', exportData);
+    const exportReportBtn = document.getElementById('export-report-btn');
+    if (exportReportBtn) exportReportBtn.addEventListener('click', exportMonthlyReport);
+    const importBtn = document.getElementById('import-data-btn');
+    const importInput = document.getElementById('import-file-input');
+    if (importBtn && importInput) {
+        importBtn.addEventListener('click', () => importInput.click());
+        importInput.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                if (file.name.toLowerCase().endsWith('.json')) {
+                    const data = JSON.parse(text);
+                    importTransactionsFromJSON(data);
+                } else {
+                    importTransactionsFromCSV(text);
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Falha ao importar arquivo.', 'danger');
+            } finally {
+                importInput.value = '';
+            }
+        });
     }
 
     function populateFilters() {
@@ -147,6 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
         monthFilter.value = currentMonth; yearFilter.value = currentYear;
     }
 
+    // Substitua a função resetForm inteira
     function resetForm() {
         financeForm.reset();
         dateInput.value = new Date().toISOString().split('T')[0];
@@ -155,34 +216,34 @@ document.addEventListener('DOMContentLoaded', () => {
         submitButton.textContent = "Adicionar";
         submitButton.classList.remove('btn-success');
         submitButton.classList.add('btn-primary');
-        
-        // Limpar campos de transação recorrente
-        const recurringCheckbox = document.getElementById('recurring-checkbox');
-        const recurringOptions = document.getElementById('recurring-options');
         if (recurringCheckbox) recurringCheckbox.checked = false;
         if (recurringOptions) recurringOptions.style.display = 'none';
+        typeInput.disabled = false; // Garante que o tipo é reativado
     }
 
     function populateBudgetsForm() {
         const categories = ["Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", "Trabalho", "Outros"];
         budgetsForm.innerHTML = '';
+        const currentPeriod = getCurrentPeriodKey(new Date(parseInt(yearFilter.value), parseInt(monthFilter.value)));
+        const periodBudgets = budgets[currentPeriod] || {};
         categories.forEach(category => {
-            const value = budgets[category] || '';
+            const value = periodBudgets[category] || '';
             const formRow = `<div class="input-group mb-2"><span class="input-group-text" style="width: 120px;">${category}</span><input type="number" class="form-control" data-category="${category}" value="${value}" placeholder="0" min="0"></div>`;
             budgetsForm.insertAdjacentHTML('beforeend', formRow);
         });
     }
 
     document.querySelector('[data-bs-target="#budgets-modal"]').addEventListener('click', populateBudgetsForm);
-    
+
     saveBudgetsBtn.addEventListener('click', () => {
         const inputs = budgetsForm.querySelectorAll('input');
-        budgets = {}; // Limpa os orçamentos antigos antes de salvar
+        const currentPeriod = getCurrentPeriodKey(new Date(parseInt(yearFilter.value), parseInt(monthFilter.value)));
+        budgets[currentPeriod] = {}; // sobrescreve somente o período atual
         inputs.forEach(input => {
             const category = input.dataset.category;
             const amount = parseFloat(input.value);
             if (amount > 0) {
-                budgets[category] = amount;
+                budgets[currentPeriod][category] = amount;
             }
         });
         saveBudgets(); // Salvar no localStorage
@@ -191,68 +252,84 @@ document.addEventListener('DOMContentLoaded', () => {
         filterTransactions();
     });
 
+    // Substitua a função financeForm.addEventListener('submit', ...) inteira
     financeForm.addEventListener('submit', (event) => {
         event.preventDefault();
-        const description = descriptionInput.value; const amount = parseFloat(amountInput.value);
-        const type = typeInput.value; const date = dateInput.value; const category = categoryInput.value;
-        if (!date || !description || isNaN(amount) || amount <= 0 || !category) {
-            showToast("Por favor, preencha todos os campos com valores válidos.", "warning"); return;
+        const description = descriptionInput.value.trim();
+        const totalAmount = parseFloat(amountInput.value);
+        const type = typeInput.value;
+        const date = dateInput.value;
+        const category = categoryInput.value;
+        const isInstallment = recurringCheckbox.checked;
+        const totalInstallments = isInstallment ? parseInt(installmentTotalInput.value) : 1; // Usa o novo ID
+
+        if (!date || !description || isNaN(totalAmount) || totalAmount <= 0 || !category || (isInstallment && (isNaN(totalInstallments) || totalInstallments < 2))) {
+            showToast("Por favor, preencha todos os campos corretamente.", "warning");
+            return;
         }
+
+        if (currentlyEditingItem && currentlyEditingItem.dataset.isInstallment === 'true') {
+            showToast("Não é possível editar uma parcela individualmente.", "warning");
+            return;
+        }
+
         const successMessage = currentlyEditingItem ? "Transação atualizada!" : "Transação adicionada!";
-        
-        // Verificar se é transação recorrente
-        const isRecurring = document.getElementById('recurring-checkbox').checked;
-        const frequency = document.getElementById('recurring-frequency').value;
-        
+
         if (currentlyEditingItem === null) {
-            const transactionData = {
-                description, amount, type, date, category,
-                id: Date.now() + Math.random()
-            };
-            
-            // Adicionar transação principal
-            const listItem = document.createElement('li'); 
-            listItem.className = 'list-group-item transaction-item';
-            listItem.dataset.description = description; 
-            listItem.dataset.amount = amount;
-            listItem.dataset.type = type; 
-            listItem.dataset.date = date; 
-            listItem.dataset.category = category;
-            listItem.dataset.id = transactionData.id;
-            financeList.appendChild(listItem);
-            
-            // Se for recorrente, criar transações futuras
-            if (isRecurring) {
-                const recurringTransactions = createRecurringTransactions(transactionData, frequency);
-                recurringTransactions.forEach(rt => {
-                    const recurringItem = document.createElement('li');
-                    recurringItem.className = 'list-group-item transaction-item';
-                    recurringItem.dataset.description = rt.description;
-                    recurringItem.dataset.amount = rt.amount;
-                    recurringItem.dataset.type = rt.type;
-                    recurringItem.dataset.date = rt.date;
-                    recurringItem.dataset.category = rt.category;
-                    recurringItem.dataset.id = rt.id;
-                    financeList.appendChild(recurringItem);
-                });
-                showToast(`${successMessage} ${recurringTransactions.length + 1} transações criadas!`, "success");
+            // LÓGICA DE ADICIONAR
+            const installmentAmount = isInstallment ? parseFloat((totalAmount / totalInstallments).toFixed(2)) : totalAmount;
+            const startDate = new Date(date + 'T00:00:00');
+            let transactionsAddedCount = 0;
+
+            for (let i = 0; i < totalInstallments; i++) {
+                const installmentDate = new Date(startDate);
+                installmentDate.setMonth(startDate.getMonth() + i);
+
+                const year = installmentDate.getFullYear();
+                const month = (installmentDate.getMonth() + 1).toString().padStart(2, '0');
+                const day = installmentDate.getDate().toString().padStart(2, '0');
+                const installmentDateString = `${year}-${month}-${day}`;
+
+                const installmentDescription = isInstallment ? `${description} (${i + 1}/${totalInstallments})` : description;
+
+                const listItem = document.createElement('li');
+                listItem.className = 'list-group-item transaction-item';
+                listItem.dataset.id = Date.now() + Math.random() + i;
+                listItem.dataset.description = installmentDescription;
+                listItem.dataset.amount = installmentAmount;
+                listItem.dataset.type = 'Despesa'; // Parcela é sempre despesa
+                listItem.dataset.date = installmentDateString;
+                listItem.dataset.category = category;
+                if (isInstallment) {
+                    listItem.dataset.isInstallment = 'true';
+                    listItem.dataset.installmentNumber = i + 1;
+                    listItem.dataset.totalInstallments = totalInstallments;
+                }
+                financeList.appendChild(listItem);
+                transactionsAddedCount++;
+            }
+            if (isInstallment) {
+                showToast(`${transactionsAddedCount} parcelas adicionadas!`, "success");
+            } else {
+                showToast(successMessage, "success");
             }
         } else {
-            currentlyEditingItem.dataset.description = description; 
-            currentlyEditingItem.dataset.amount = amount;
-            currentlyEditingItem.dataset.type = type; 
-            currentlyEditingItem.dataset.date = date; 
+            // LÓGICA DE EDITAR (sem alterações)
+            currentlyEditingItem.dataset.description = description;
+            currentlyEditingItem.dataset.amount = totalAmount;
+            currentlyEditingItem.dataset.type = type;
+            currentlyEditingItem.dataset.date = date;
             currentlyEditingItem.dataset.category = category;
+            delete currentlyEditingItem.dataset.isInstallment;
+            delete currentlyEditingItem.dataset.installmentNumber;
+            delete currentlyEditingItem.dataset.totalInstallments;
+            showToast(successMessage, "success");
         }
-        
-        saveTransactions(); // Salvar no localStorage
+
+        saveTransactions();
         resetForm();
         filterTransactions();
         transactionModal.hide();
-        
-        if (!isRecurring) {
-            showToast(successMessage, "success");
-        }
     });
 
     document.getElementById('transaction-modal').addEventListener('hidden.bs.modal', resetForm);
@@ -260,16 +337,48 @@ document.addEventListener('DOMContentLoaded', () => {
     filterTransactions();
     monthFilter.addEventListener('change', filterTransactions);
     yearFilter.addEventListener('change', filterTransactions);
+    if (sortFilter) sortFilter.addEventListener('change', filterTransactions);
     // Debounce para reduzir re-render a cada tecla digitada
     function debounce(fn, delay = 250) {
         let timer;
-        return function(...args) {
+        return function (...args) {
             clearTimeout(timer);
             timer = setTimeout(() => fn.apply(this, args), delay);
         };
     }
     searchFilter.addEventListener('input', debounce(filterTransactions, 250));
     setupFinanceActionListeners();
+
+    // Seleção em massa
+    function updateBulkState() {
+        const anyChecked = !!document.querySelector('.transaction-item input[type="checkbox"]:checked');
+        bulkDeleteBtn.disabled = !anyChecked;
+        bulkApplyBtn.disabled = !anyChecked || !bulkCategorySelect.value;
+    }
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', () => {
+            document.querySelectorAll('.transaction-item input[type="checkbox"]').forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateBulkState();
+        });
+    }
+    if (bulkCategorySelect) bulkCategorySelect.addEventListener('change', updateBulkState);
+    if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', () => {
+        const checked = Array.from(document.querySelectorAll('.transaction-item input[type="checkbox"]:checked')).map(cb => cb.closest('.transaction-item'));
+        if (checked.length === 0) return;
+        checked.forEach(item => item.remove());
+        saveTransactions();
+        filterTransactions();
+        showToast(`${checked.length} transação(ões) excluída(s).`, 'info');
+    });
+    if (bulkApplyBtn) bulkApplyBtn.addEventListener('click', () => {
+        const newCat = bulkCategorySelect.value;
+        if (!newCat) return;
+        const checked = Array.from(document.querySelectorAll('.transaction-item input[type="checkbox"]:checked')).map(cb => cb.closest('.transaction-item'));
+        checked.forEach(item => item.dataset.category = newCat);
+        saveTransactions();
+        filterTransactions();
+        showToast(`Categoria aplicada em ${checked.length} item(ns).`, 'success');
+    });
 });
 
 function filterTransactions() {
@@ -282,7 +391,9 @@ function filterTransactions() {
     const selectedMonth = parseInt(monthFilter.value);
     const selectedYear = parseInt(yearFilter.value);
     const searchTerm = searchFilter.value.toLowerCase();
-    const transactions = financeList.querySelectorAll('.list-group-item');
+    // Remover cabeçalhos anteriores
+    Array.from(financeList.querySelectorAll('.transaction-header')).forEach(h => h.remove());
+    const transactions = Array.from(financeList.querySelectorAll('.list-group-item.transaction-item'));
     const monthlyIncomeEl = document.getElementById('monthly-income');
     const monthlyExpensesEl = document.getElementById('monthly-expenses');
     const monthlyBalanceEl = document.getElementById('monthly-balance');
@@ -295,13 +406,35 @@ function filterTransactions() {
     const previousMonth = previousMonthDate.getMonth();
     const previousYear = previousMonthDate.getFullYear();
 
-    transactions.forEach(transaction => {
+    const sortMode = document.getElementById('sort-filter')?.value || 'date_desc';
+    const sorted = transactions.sort((a, b) => {
+        const ad = new Date(a.dataset.date + 'T00:00:00').getTime();
+        const bd = new Date(b.dataset.date + 'T00:00:00').getTime();
+        const aa = parseFloat(a.dataset.amount);
+        const ba = parseFloat(b.dataset.amount);
+        switch (sortMode) {
+            case 'date_asc':
+                return ad - bd;
+            case 'amount_desc':
+                return ba - aa;
+            case 'amount_asc':
+                return aa - ba;
+            case 'date_desc':
+            default:
+                return bd - ad;
+        }
+    });
+
+    let lastHeaderDate = '';
+    sorted.forEach(transaction => {
         const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
         const transactionMonth = transactionDate.getMonth();
         const transactionYear = transactionDate.getFullYear();
         const descriptionLower = transaction.dataset.description.toLowerCase();
+        const categoryLower = (transaction.dataset.category || '').toLowerCase();
+        const typeLower = (transaction.dataset.type || '').toLowerCase();
         const isMonthMatch = transactionMonth === selectedMonth && transactionYear === selectedYear;
-        const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm);
+        const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm) || categoryLower.includes(searchTerm) || typeLower.includes(searchTerm);
         if (isMonthMatch && isSearchMatch) {
             transaction.style.display = 'block';
             const { amount, type, date, category } = transaction.dataset;
@@ -320,6 +453,17 @@ function filterTransactions() {
 
             const left = document.createElement('div');
             left.className = 'd-flex align-items-center';
+            const check = document.createElement('input');
+            check.type = 'checkbox';
+            check.className = 'form-check-input me-2';
+            check.addEventListener('change', () => {
+                const anyChecked = !!document.querySelector('.transaction-item input[type="checkbox"]:checked');
+                const bulkDeleteBtn = document.getElementById('bulk-delete');
+                const bulkApplyBtn = document.getElementById('bulk-apply');
+                const bulkCategorySelect = document.getElementById('bulk-category');
+                if (bulkDeleteBtn) bulkDeleteBtn.disabled = !anyChecked;
+                if (bulkApplyBtn) bulkApplyBtn.disabled = !anyChecked || !bulkCategorySelect?.value;
+            });
             const icon = document.createElement('i');
             icon.className = `bi ${typeIcon} me-3 fs-4`;
             const leftTextWrap = document.createElement('div');
@@ -338,6 +482,7 @@ function filterTransactions() {
             meta.appendChild(document.createTextNode(category));
             leftTextWrap.appendChild(title);
             leftTextWrap.appendChild(meta);
+            left.appendChild(check);
             left.appendChild(icon);
             left.appendChild(leftTextWrap);
 
@@ -371,7 +516,17 @@ function filterTransactions() {
             wrapper.appendChild(left);
             wrapper.appendChild(right);
             transaction.appendChild(wrapper);
-            
+            // Inserir cabeçalho por data se mudou
+            if (date !== lastHeaderDate) {
+                lastHeaderDate = date;
+                const header = document.createElement('li');
+                header.className = 'list-group-item transaction-header bg-light-subtle text-muted fw-semibold';
+                header.textContent = new Date(date).toLocaleDateString('pt-BR');
+                financeList.appendChild(header);
+            }
+            // Reposicionar conforme ordenação
+            financeList.appendChild(transaction);
+
             if (type === 'Receita') {
                 monthlyIncome += numAmount;
             } else {
@@ -393,7 +548,7 @@ function filterTransactions() {
     monthlyExpensesEl.textContent = monthlyExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.textContent = monthlyBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.className = 'h5 mb-0 ' + (monthlyBalance < 0 ? 'text-danger' : 'text-dark');
-    
+
     expenseTrendEl.innerHTML = '';
     if (monthlyExpenses > 0 || previousMonthExpenses > 0) {
         const difference = monthlyExpenses - previousMonthExpenses;
@@ -402,18 +557,26 @@ function filterTransactions() {
         else if (difference < -0.01) expenseTrendEl.innerHTML = `<span class="text-success fw-bold">▼ ${absDifference}</span>`;
         else expenseTrendEl.innerHTML = `<span class="text-muted">=</span>`;
     }
-    
+
     categoryList.innerHTML = '';
     const allCategoriesInView = new Set(Object.keys(categoryTotals));
-    Object.keys(budgets).forEach(cat => allCategoriesInView.add(cat));
+    const currentPeriodKey = getCurrentPeriodKey(new Date(selectedYear, selectedMonth));
+    const periodBudgets = (budgets && budgets[currentPeriodKey]) || {};
+    Object.keys(periodBudgets).forEach(cat => allCategoriesInView.add(cat));
     const sortedCategories = Array.from(allCategoriesInView).sort((a, b) => (categoryTotals[b] || 0) - (categoryTotals[a] || 0));
 
     if (sortedCategories.length > 0) {
+        // cálculo para previsão mensal simples
+        const now = new Date();
+        const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+        const today = selectedYear === now.getFullYear() && selectedMonth === now.getMonth() ? now.getDate() : daysInMonth;
+        const daysLeft = Math.max(0, daysInMonth - today);
+
         sortedCategories.forEach(category => {
             const total = categoryTotals[category] || 0;
             const listItem = document.createElement('li');
             listItem.className = 'list-group-item';
-            const budget = budgets[category];
+            const budget = periodBudgets[category];
             let progressHtml = '';
             if (budget) {
                 const percentage = Math.min((total / budget) * 100, 100);
@@ -422,8 +585,13 @@ function filterTransactions() {
                 if (percentage >= 100) bgColor = 'bg-danger';
                 const totalFormatted = total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
                 const budgetFormatted = budget.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const spentPerDay = today > 0 ? (total / today) : 0;
+                const projected = total + spentPerDay * daysLeft;
+                const projectedFormatted = projected.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const remaining = Math.max(0, budget - total);
+                const remainingFormatted = remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
                 progressHtml = `
-                    <small class="text-muted d-block">${totalFormatted} de ${budgetFormatted}</small>
+                    <small class="text-muted d-block">${totalFormatted} de ${budgetFormatted} • Restante: ${remainingFormatted} • Prev.: ${projectedFormatted}</small>
                     <div class="progress mt-1 budget-progress" role="progressbar">
                         <div class="progress-bar ${bgColor}" style="width: ${percentage}%"></div>
                     </div>`;
@@ -459,17 +627,48 @@ function setupFinanceActionListeners() {
     if (!list) return;
 
     list.addEventListener('click', (event) => {
-        const target = event.target; 
+        const target = event.target;
         const item = target.closest('.list-group-item');
         if (!item) return;
 
         if (target.closest('.delete-btn')) {
+            // guardar para desfazer
+            const deleted = {
+                id: item.dataset.id,
+                description: item.dataset.description,
+                amount: item.dataset.amount,
+                type: item.dataset.type,
+                date: item.dataset.date,
+                category: item.dataset.category
+            };
             item.remove();
-            saveTransactions(); // Salvar no localStorage após deletar
+            saveTransactions();
             filterTransactions();
-            showToast("Transação apagada.", "info");
+            showToast("Transação apagada.", "info", {
+                actionText: 'Desfazer',
+                delay: 6000,
+                onAction: () => {
+                    // recriar item
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item transaction-item';
+                    li.dataset.id = deleted.id || (Date.now() + Math.random());
+                    li.dataset.description = deleted.description;
+                    li.dataset.amount = deleted.amount;
+                    li.dataset.type = deleted.type;
+                    li.dataset.date = deleted.date;
+                    li.dataset.category = deleted.category;
+                    document.getElementById('finance-list').appendChild(li);
+                    saveTransactions();
+                    filterTransactions();
+                    showToast('Transação restaurada.', 'success');
+                }
+            });
         }
         if (target.closest('.edit-btn')) {
+            if (item.dataset.isInstallment === 'true') {
+                showToast("Não é possível editar uma parcela individualmente.", "warning");
+                return;
+            }
             currentlyEditingItem = item;
             const { description, amount, type, date, category } = item.dataset;
             document.getElementById('finance-description').value = description;
@@ -492,12 +691,12 @@ function setupFinanceActionListeners() {
 function exportData() {
     const transactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, []);
     const budgets = loadFromStorage(STORAGE_KEYS.BUDGETS, {});
-    
+
     if (transactions.length === 0) {
         showToast("Nenhuma transação para exportar.", "warning");
         return;
     }
-    
+
     // Criar CSV (valor bruto + valor formatado)
     let csvContent = "Data,Descrição,Valor,ValorFormatado,Tipo,Categoria\n";
     transactions.forEach(transaction => {
@@ -508,7 +707,7 @@ function exportData() {
         const cat = String(transaction.category).replaceAll('"', '""');
         csvContent += `${dateISO},"${desc}",${amountRaw},${amountFormatted},${transaction.type},"${cat}"\n`;
     });
-    
+
     // Download do arquivo
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -519,20 +718,154 @@ function exportData() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+
     showToast("Dados exportados com sucesso!", "success");
 }
 
+// Relatório mensal consolidado (CSV por categoria e totais)
+function exportMonthlyReport() {
+    const monthFilter = document.getElementById('month-filter');
+    const yearFilter = document.getElementById('year-filter');
+    const selectedMonth = parseInt(monthFilter.value);
+    const selectedYear = parseInt(yearFilter.value);
+    const items = Array.from(document.querySelectorAll('#finance-list .transaction-item'));
+    const totals = { Receita: 0, Despesa: 0 };
+    const byCategory = {};
+    items.forEach(it => {
+        const d = new Date(it.dataset.date + 'T00:00:00');
+        if (d.getMonth() !== selectedMonth || d.getFullYear() !== selectedYear) return;
+        const amt = parseFloat(it.dataset.amount);
+        const type = it.dataset.type;
+        const cat = it.dataset.category || 'Outros';
+        if (!isNaN(amt)) {
+            totals[type] = (totals[type] || 0) + amt;
+            if (type === 'Despesa') byCategory[cat] = (byCategory[cat] || 0) + amt;
+        }
+    });
+    const saldo = (totals['Receita'] || 0) - (totals['Despesa'] || 0);
+    let csv = `Relatório;${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}\n`;
+    csv += `Receitas;${totals['Receita'] || 0}\nDespesas;${totals['Despesa'] || 0}\nSaldo;${saldo}\n\n`;
+    csv += `Categoria;TotalDespesa\n`;
+    Object.keys(byCategory).sort((a, b) => (byCategory[b] - byCategory[a])).forEach(cat => {
+        csv += `${cat};${byCategory[cat]}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = `relatorio_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Relatório mensal exportado.', 'success');
+}
+
+// Importar transações de JSON
+function importTransactionsFromJSON(jsonData) {
+    if (!Array.isArray(jsonData)) {
+        showToast('Formato JSON inválido. Use uma lista de transações.', 'warning');
+        return;
+    }
+    const financeList = document.getElementById('finance-list');
+    jsonData.forEach(t => {
+        if (!t.date || !t.description || !t.category || typeof t.amount !== 'number' || !t.type) return;
+        const li = document.createElement('li');
+        li.className = 'list-group-item transaction-item';
+        li.dataset.id = t.id || (Date.now() + Math.random());
+        li.dataset.description = t.description;
+        li.dataset.amount = String(t.amount);
+        li.dataset.type = t.type;
+        li.dataset.date = t.date;
+        li.dataset.category = t.category;
+        financeList.appendChild(li);
+    });
+    saveTransactions();
+    filterTransactions();
+    showToast('Transações importadas (JSON).', 'success');
+}
+
+// Importar transações de CSV (espera cabeçalho semelhante ao export)
+function importTransactionsFromCSV(text) {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length <= 1) { showToast('CSV vazio.', 'warning'); return; }
+    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const idxDate = header.indexOf('data') >= 0 ? header.indexOf('data') : header.indexOf('date');
+    const idxDesc = header.indexOf('descrição') >= 0 ? header.indexOf('descrição') : header.indexOf('descricao');
+    const idxAmountRaw = header.indexOf('valor');
+    const idxType = header.indexOf('tipo');
+    const idxCat = header.indexOf('categoria');
+    if (idxDate < 0 || idxDesc < 0 || idxAmountRaw < 0 || idxType < 0 || idxCat < 0) {
+        showToast('Cabeçalho do CSV não reconhecido.', 'warning');
+        return;
+    }
+    const financeList = document.getElementById('finance-list');
+    for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]);
+        if (!cols || cols.length < header.length) continue;
+        const dateStr = cols[idxDate];
+        const desc = stripQuotes(cols[idxDesc]);
+        const type = cols[idxType];
+        const cat = stripQuotes(cols[idxCat]);
+        const amount = Number(cols[idxAmountRaw].replace(/\./g, '').replace(',', '.'));
+        if (!dateStr || !desc || !cat || !type || isNaN(amount)) continue;
+        const li = document.createElement('li');
+        li.className = 'list-group-item transaction-item';
+        li.dataset.id = Date.now() + Math.random();
+        li.dataset.description = desc;
+        li.dataset.amount = String(amount);
+        li.dataset.type = type;
+        li.dataset.date = normalizeDate(dateStr);
+        li.dataset.category = cat;
+        financeList.appendChild(li);
+    }
+    saveTransactions();
+    filterTransactions();
+    showToast('Transações importadas (CSV).', 'success');
+}
+
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+            else { inQuotes = !inQuotes; }
+        } else if (ch === ',' && !inQuotes) {
+            result.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    result.push(current);
+    return result.map(s => s.trim());
+}
+
+function stripQuotes(s) { return s?.replace(/^"|"$/g, '') || s; }
+
+function normalizeDate(s) {
+    // aceita YYYY-MM-DD ou DD/MM/YYYY
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+        const d = m[1].padStart(2, '0');
+        const mo = m[2].padStart(2, '0');
+        return `${m[3]}-${mo}-${d}`;
+    }
+    return new Date(s).toISOString().split('T')[0];
+}
 // Função para criar transações recorrentes
 function createRecurringTransactions(transaction, frequency) {
     const baseDate = new Date(transaction.date);
     const transactions = [];
-    
+
     // Criar transações futuras de acordo com a frequência
     const iterations = frequency === 'weekly' ? 12 : frequency === 'monthly' ? 12 : 2; // yearly: 2 anos
     for (let i = 1; i <= iterations; i++) {
         const newDate = new Date(baseDate);
-        
+
         switch (frequency) {
             case 'weekly':
                 newDate.setDate(baseDate.getDate() + (i * 7));
@@ -544,14 +877,14 @@ function createRecurringTransactions(transaction, frequency) {
                 newDate.setFullYear(baseDate.getFullYear() + i);
                 break;
         }
-        
+
         transactions.push({
             ...transaction,
             id: Date.now() + Math.random() + i,
             date: newDate.toISOString().split('T')[0]
         });
     }
-    
+
     return transactions;
 }
 
@@ -561,29 +894,29 @@ function addAdvancedMetrics() {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
-    
+
     // Calcular métricas
     const monthlyTransactions = transactions.filter(t => {
         const tDate = new Date(t.date);
         return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
     });
-    
+
     const totalIncome = monthlyTransactions
         .filter(t => t.type === 'Receita')
         .reduce((sum, t) => sum + t.amount, 0);
-    
+
     const totalExpenses = monthlyTransactions
         .filter(t => t.type === 'Despesa')
         .reduce((sum, t) => sum + t.amount, 0);
-    
+
     const balance = totalIncome - totalExpenses;
-    
+
     // Adicionar indicadores visuais
     const balanceElement = document.getElementById('monthly-balance');
     if (balanceElement) {
         const balanceClass = balance >= 0 ? 'text-success' : 'text-danger';
         balanceElement.className = `h5 mb-0 ${balanceClass}`;
-        
+
         // Adicionar emoji baseado no saldo
         const emoji = balance >= 0 ? '💰' : '⚠️';
         balanceElement.innerHTML = `${emoji} ${balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;

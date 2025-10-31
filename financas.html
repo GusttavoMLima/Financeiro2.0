@@ -54,9 +54,18 @@
                                 <button class="btn btn-outline-futuristic" id="export-data-btn" title="Exportar Dados">
                                     <i class="bi bi-download"></i>
                                 </button>
+                                <button class="btn btn-outline-futuristic" id="export-report-btn"
+                                    title="Exportar Relatório Mensal">
+                                    <i class="bi bi-file-earmark-spreadsheet"></i>
+                                </button>
+                                <button class="btn btn-outline-futuristic" id="import-data-btn" title="Importar Dados">
+                                    <i class="bi bi-upload"></i>
+                                </button>
+                                <input type="file" id="import-file-input" accept=".csv,.json" style="display:none">
                                 <button class="btn btn-futuristic" data-bs-toggle="modal"
                                     data-bs-target="#transaction-modal">
                                     + Adicionar Nova Transação
+                                        
                                 </button>
                             </div>
                         </div>
@@ -67,7 +76,40 @@
                             </div>
                             <div class="flex-grow-1">
                                 <input type="search" id="search-filter" class="form-control form-control-sm"
-                                    placeholder="Buscar por descrição...">
+                                    placeholder="Buscar por descrição, categoria ou tipo...">
+                            </div>
+                            <div>
+                                <select id="sort-filter" class="form-select form-select-sm">
+                                    <option value="date_desc">Data ↓</option>
+                                    <option value="date_asc">Data ↑</option>
+                                    <option value="amount_desc">Valor ↓</option>
+                                    <option value="amount_asc">Valor ↑</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="select-all">
+                                <label class="form-check-label" for="select-all">Selecionar tudo</label>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-danger" id="bulk-delete" disabled>
+                                    <i class="bi bi-trash"></i> Excluir Selecionadas
+                                </button>
+                                <div class="input-group input-group-sm" style="width: 260px;">
+                                    <label class="input-group-text" for="bulk-category">Categoria</label>
+                                    <select id="bulk-category" class="form-select">
+                                        <option value="">—</option>
+                                        <option>Alimentação</option>
+                                        <option>Moradia</option>
+                                        <option>Transporte</option>
+                                        <option>Lazer</option>
+                                        <option>Saúde</option>
+                                        <option>Trabalho</option>
+                                        <option>Outros</option>
+                                    </select>
+                                    <button class="btn btn-outline-primary" id="bulk-apply" disabled>Aplicar</button>
+                                </div>
                             </div>
                         </div>
                         <ul id="finance-list" class="list-group"></ul>
@@ -141,7 +183,7 @@
                             <option value="Receita">Receita</option>
                             <option value="Despesa">Despesa</option>
                         </select>
-                        
+
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="recurring-checkbox">
                             <label class="form-check-label" for="recurring-checkbox">
@@ -149,12 +191,9 @@
                             </label>
                         </div>
                         <div id="recurring-options" class="mb-3" style="display: none;">
-                            <label for="recurring-frequency" class="form-label">Frequência</label>
-                            <select id="recurring-frequency" class="form-select">
-                                <option value="monthly">Mensal</option>
-                                <option value="weekly">Semanal</option>
-                                <option value="yearly">Anual</option>
-                            </select>
+                            <label for="installment-total" class="form-label">Número de Parcelas</label>
+                            <input type="number" id="installment-total" class="form-control" min="2"
+                                placeholder="Ex: 10">
                         </div>
                     </form>
                 </div>

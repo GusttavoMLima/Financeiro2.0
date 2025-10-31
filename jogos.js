@@ -162,7 +162,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     platformFilter.addEventListener('change', updateGameView);
     statusFilter.addEventListener('change', updateGameView);
-    searchFilter.addEventListener('input', updateGameView);
+    // Debounce da busca por nome
+    function debounce(fn, delay = 250) {
+        let t;
+        return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
+    }
+    searchFilter.addEventListener('input', debounce(updateGameView, 250));
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-games-btn');
@@ -200,70 +205,128 @@ function updateGameView() {
             if (status === 'Jogando') playingCount++;
             if (status === 'Finalizado') finishedCount++;
             if (status === 'Backlog') backlogCount++;
-            // Interface visual melhorada com dados da API
             const platformIcon = getPlatformIcon(platform);
             const statusColor = getStatusColor(status);
-            const ratingDisplay = rating && rating !== 'Sem nota' ? `<span class="game-rating">${rating}</span>` : '';
             const dateAdded = new Date(game.dataset.dateAdded).toLocaleDateString('pt-BR');
-            
-            // Verificar se tem dados da API
             const hasAPIData = game.dataset.apiData;
             const apiData = hasAPIData ? JSON.parse(game.dataset.apiData) : null;
             
-            game.innerHTML = `
-                <div class="d-flex w-100 justify-content-between align-items-center">
-                    <div class="d-flex align-items-center">
-                        <div class="platform-icon me-3">
-                            <i class="bi ${platformIcon} fs-3"></i>
-                        </div>
-                        <div class="flex-grow-1">
-                            <h5 class="mb-1 fw-bold">${title}</h5>
-                            <div class="d-flex align-items-center gap-2 mb-1">
-                                <small class="text-muted">
-                                    <i class="bi bi-controller me-1"></i>${platform}
-                                </small>
-                                <small class="text-muted">
-                                    <i class="bi bi-calendar3 me-1"></i>${dateAdded}
-                                </small>
-                                ${apiData ? `
-                                    <small class="text-success">
-                                        <i class="bi bi-star me-1"></i>${apiData.rating || 'N/A'}/5
-                                    </small>
-                                ` : ''}
-                            </div>
-                            ${apiData ? `
-                                <div class="d-flex align-items-center gap-2 mb-1">
-                                    <small class="text-muted">
-                                        <i class="bi bi-tags me-1"></i>${apiData.genres?.slice(0, 2).join(', ') || 'N/A'}
-                                    </small>
-                                    ${apiData.metacritic ? `
-                                        <small class="text-info">
-                                            <i class="bi bi-award me-1"></i>${apiData.metacritic}
-                                        </small>
-                                    ` : ''}
-                                </div>
-                            ` : ''}
-                        ${ratingDisplay}
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge ${statusColor} rounded-pill px-3 py-2">${status}</span>
-                        <div class="btn-group" role="group">
-                            ${apiData ? `
-                                <button class="btn btn-sm btn-outline-info view-api-details-btn" title="Ver Detalhes da API" data-api-data='${JSON.stringify(apiData)}'>
-                                    <i class="bi bi-info-circle"></i>
-                                </button>
-                            ` : ''}
-                            <button class="btn btn-sm btn-outline-primary edit-btn" title="Editar">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-btn" title="Excluir">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
+            // Limpar e renderizar de forma segura
+            game.textContent = '';
+            const wrap = document.createElement('div');
+            wrap.className = 'd-flex w-100 justify-content-between align-items-center';
+
+            const left = document.createElement('div');
+            left.className = 'd-flex align-items-center';
+            const iconWrap = document.createElement('div');
+            iconWrap.className = 'platform-icon me-3';
+            const icon = document.createElement('i');
+            icon.className = `bi ${platformIcon} fs-3`;
+            iconWrap.appendChild(icon);
+
+            const leftText = document.createElement('div');
+            leftText.className = 'flex-grow-1';
+            const titleEl = document.createElement('h5');
+            titleEl.className = 'mb-1 fw-bold';
+            titleEl.textContent = title;
+            const metaRow = document.createElement('div');
+            metaRow.className = 'd-flex align-items-center gap-2 mb-1';
+            const smallPlatform = document.createElement('small');
+            smallPlatform.className = 'text-muted';
+            const ctrlIcon = document.createElement('i');
+            ctrlIcon.className = 'bi bi-controller me-1';
+            smallPlatform.appendChild(ctrlIcon);
+            smallPlatform.appendChild(document.createTextNode(platform));
+            const smallDate = document.createElement('small');
+            smallDate.className = 'text-muted';
+            const calIcon = document.createElement('i');
+            calIcon.className = 'bi bi-calendar3 me-1';
+            smallDate.appendChild(calIcon);
+            smallDate.appendChild(document.createTextNode(dateAdded));
+            metaRow.appendChild(smallPlatform);
+            metaRow.appendChild(smallDate);
+            if (apiData) {
+                const smallRating = document.createElement('small');
+                smallRating.className = 'text-success';
+                const star = document.createElement('i');
+                star.className = 'bi bi-star me-1';
+                smallRating.appendChild(star);
+                smallRating.appendChild(document.createTextNode(`${apiData.rating || 'N/A'}/5`));
+                metaRow.appendChild(smallRating);
+            }
+            leftText.appendChild(titleEl);
+            leftText.appendChild(metaRow);
+            if (apiData) {
+                const metaRow2 = document.createElement('div');
+                metaRow2.className = 'd-flex align-items-center gap-2 mb-1';
+                const smallGenres = document.createElement('small');
+                smallGenres.className = 'text-muted';
+                const tagIcon = document.createElement('i');
+                tagIcon.className = 'bi bi-tags me-1';
+                smallGenres.appendChild(tagIcon);
+                smallGenres.appendChild(document.createTextNode((apiData.genres || []).slice(0, 2).join(', ') || 'N/A'));
+                metaRow2.appendChild(smallGenres);
+                if (apiData.metacritic) {
+                    const smallMeta = document.createElement('small');
+                    smallMeta.className = 'text-info';
+                    const awardIcon = document.createElement('i');
+                    awardIcon.className = 'bi bi-award me-1';
+                    smallMeta.appendChild(awardIcon);
+                    smallMeta.appendChild(document.createTextNode(String(apiData.metacritic)));
+                    metaRow2.appendChild(smallMeta);
+                }
+                leftText.appendChild(metaRow2);
+            }
+            if (rating && rating !== 'Sem nota') {
+                const ratingSpan = document.createElement('span');
+                ratingSpan.className = 'game-rating';
+                ratingSpan.textContent = rating;
+                leftText.appendChild(ratingSpan);
+            }
+            left.appendChild(iconWrap);
+            left.appendChild(leftText);
+
+            const right = document.createElement('div');
+            right.className = 'd-flex align-items-center gap-2';
+            const badge = document.createElement('span');
+            badge.className = `badge ${statusColor} rounded-pill px-3 py-2`;
+            badge.textContent = status;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group';
+            btnGroup.setAttribute('role', 'group');
+            if (apiData) {
+                const infoBtn = document.createElement('button');
+                infoBtn.className = 'btn btn-sm btn-outline-info view-api-details-btn';
+                infoBtn.title = 'Ver Detalhes da API';
+                infoBtn.setAttribute('aria-label', 'Ver detalhes da API');
+                infoBtn.dataset.apiData = JSON.stringify(apiData);
+                const infoIcon = document.createElement('i');
+                infoIcon.className = 'bi bi-info-circle';
+                infoBtn.appendChild(infoIcon);
+                btnGroup.appendChild(infoBtn);
+            }
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-primary edit-btn';
+            editBtn.title = 'Editar';
+            editBtn.setAttribute('aria-label', 'Editar jogo');
+            const editIcon = document.createElement('i');
+            editIcon.className = 'bi bi-pencil';
+            editBtn.appendChild(editIcon);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+            delBtn.title = 'Excluir';
+            delBtn.setAttribute('aria-label', 'Excluir jogo');
+            const delIcon = document.createElement('i');
+            delIcon.className = 'bi bi-trash';
+            delBtn.appendChild(delIcon);
+            btnGroup.appendChild(editBtn);
+            btnGroup.appendChild(delBtn);
+            right.appendChild(badge);
+            right.appendChild(btnGroup);
+
+            wrap.appendChild(left);
+            wrap.appendChild(right);
+            game.appendChild(wrap);
         } else {
             game.style.display = 'none';
         }
@@ -283,14 +346,14 @@ function setupGameActionListeners() {
         const item = target.closest('.game-item');
         if (!item) return;
 
-        if (target.classList.contains('delete-btn')) {
+        if (target.closest('.delete-btn')) {
             item.remove();
             saveGamesToStorage(); // Salvar no localStorage após deletar
             updateGameView();
             showToast("Jogo apagado.", "info");
         }
 
-        if (target.classList.contains('edit-btn')) {
+        if (target.closest('.edit-btn')) {
             currentlyEditingGame = item;
             const { title, platform, status, rating } = item.dataset;
             
@@ -308,8 +371,9 @@ function setupGameActionListeners() {
             gameModal.show();
         }
 
-        if (target.classList.contains('view-api-details-btn')) {
-            const apiData = JSON.parse(target.dataset.apiData);
+        if (target.closest('.view-api-details-btn')) {
+            const btn = target.closest('.view-api-details-btn');
+            const apiData = JSON.parse(btn.dataset.apiData);
             showAPIGameDetails(apiData);
         }
     });

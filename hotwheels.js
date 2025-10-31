@@ -158,7 +158,12 @@ hwForm.addEventListener('submit', (event) => {
     document.getElementById('hw-modal').addEventListener('hidden.bs.modal', resetForm);
     
     seriesFilter.addEventListener('change', updateHwView);
-    searchFilter.addEventListener('input', updateHwView);
+    // Debounce da busca por nome/numero
+    function debounce(fn, delay = 250) {
+        let t;
+        return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), delay); };
+    }
+    searchFilter.addEventListener('input', debounce(updateHwView, 250));
 
     // Botão de exportar dados
     const exportBtn = document.getElementById('export-hw-btn');
@@ -189,36 +194,77 @@ function updateHwView() {
             const dateAdded = new Date(item.dataset.dateAdded).toLocaleDateString('pt-BR');
             const seriesColor = getSeriesColor(series);
             
-            item.innerHTML = `
-                <div class="d-flex w-100 justify-content-between align-items-center">
-                    <div class="d-flex align-items-center">
-                        <div class="car-icon me-3">
-                            <i class="bi bi-car-front-fill fs-3 text-primary"></i>
-                        </div>
-                        <div>
-                            <h5 class="mb-1 fw-bold">${name} <span class="text-muted fw-normal fs-6">(${year})</span></h5>
-                            <div class="d-flex align-items-center gap-2 mb-1">
-                                <small class="text-muted">
-                                    <i class="bi bi-tag me-1"></i>Série: ${series || 'N/A'}
-                                </small>
-                                <small class="text-muted">
-                                    <i class="bi bi-calendar3 me-1"></i>${dateAdded}
-                                </small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge ${seriesColor} rounded-pill px-3 py-2 fs-6">${number}</span>
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-sm btn-outline-primary edit-btn" title="Editar">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-btn" title="Excluir">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>`;
+            // Renderização segura sem innerHTML
+            item.textContent = '';
+            const wrap = document.createElement('div');
+            wrap.className = 'd-flex w-100 justify-content-between align-items-center';
+
+            const left = document.createElement('div');
+            left.className = 'd-flex align-items-center';
+            const carIconWrap = document.createElement('div');
+            carIconWrap.className = 'car-icon me-3';
+            const carIcon = document.createElement('i');
+            carIcon.className = 'bi bi-car-front-fill fs-3 text-primary';
+            carIconWrap.appendChild(carIcon);
+            const leftText = document.createElement('div');
+            const title = document.createElement('h5');
+            title.className = 'mb-1 fw-bold';
+            const yearSpan = document.createElement('span');
+            yearSpan.className = 'text-muted fw-normal fs-6';
+            yearSpan.textContent = `(${year})`;
+            title.appendChild(document.createTextNode(name + ' '));
+            title.appendChild(yearSpan);
+            const metaRow = document.createElement('div');
+            metaRow.className = 'd-flex align-items-center gap-2 mb-1';
+            const smallSeries = document.createElement('small');
+            smallSeries.className = 'text-muted';
+            const tag = document.createElement('i');
+            tag.className = 'bi bi-tag me-1';
+            smallSeries.appendChild(tag);
+            smallSeries.appendChild(document.createTextNode(`Série: ${series || 'N/A'}`));
+            const smallDate = document.createElement('small');
+            smallDate.className = 'text-muted';
+            const cal = document.createElement('i');
+            cal.className = 'bi bi-calendar3 me-1';
+            smallDate.appendChild(cal);
+            smallDate.appendChild(document.createTextNode(dateAdded));
+            metaRow.appendChild(smallSeries);
+            metaRow.appendChild(smallDate);
+            leftText.appendChild(title);
+            leftText.appendChild(metaRow);
+            left.appendChild(carIconWrap);
+            left.appendChild(leftText);
+
+            const right = document.createElement('div');
+            right.className = 'd-flex align-items-center gap-2';
+            const badge = document.createElement('span');
+            badge.className = `badge ${seriesColor} rounded-pill px-3 py-2 fs-6`;
+            badge.textContent = number;
+            const btnGroup = document.createElement('div');
+            btnGroup.className = 'btn-group';
+            btnGroup.setAttribute('role', 'group');
+            const editBtn = document.createElement('button');
+            editBtn.className = 'btn btn-sm btn-outline-primary edit-btn';
+            editBtn.title = 'Editar';
+            editBtn.setAttribute('aria-label', 'Editar carrinho');
+            const editIcon = document.createElement('i');
+            editIcon.className = 'bi bi-pencil';
+            editBtn.appendChild(editIcon);
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-outline-danger delete-btn';
+            delBtn.title = 'Excluir';
+            delBtn.setAttribute('aria-label', 'Excluir carrinho');
+            const delIcon = document.createElement('i');
+            delIcon.className = 'bi bi-trash';
+            delBtn.appendChild(delIcon);
+            btnGroup.appendChild(editBtn);
+            btnGroup.appendChild(delBtn);
+            right.appendChild(badge);
+            right.appendChild(btnGroup);
+
+            wrap.appendChild(left);
+            wrap.appendChild(right);
+            item.appendChild(wrap);
             totalCount++;
             if(series) seriesSet.add(series);
             if(year) yearCounts[year] = (yearCounts[year] || 0) + 1;
@@ -254,14 +300,14 @@ function setupHwActionListeners() {
         const item = target.closest('.hw-item');
         if (!item) return;
 
-        if (target.classList.contains('delete-btn')) {
+        if (target.closest('.delete-btn')) {
             item.remove();
             saveCarsToStorage(); // Salvar no localStorage após deletar
             updateHwView();
             showToast("Carrinho apagado.", "info");
         }
 
-        if (target.classList.contains('edit-btn')) {
+        if (target.closest('.edit-btn')) {
             currentlyEditingHw = item;
             const { name, number, year, series } = item.dataset;
             document.getElementById('hw-name').value = name;
