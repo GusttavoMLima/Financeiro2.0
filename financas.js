@@ -7,6 +7,7 @@ let myCategoryChart = null;
 let currentlyEditingItem = null;
 let transactionModal = null;
 let budgetsModal = null;
+let transactionData = JSON.parse(localStorage.getItem('transactionData')) || [];
 
 // Objeto para guardar os orçamentos com persistência
 let budgets = {}; // Estrutura nova: { 'YYYY-MM': { Categoria: valor } } com compatibilidade legado
@@ -153,6 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const recurringCheckbox = document.getElementById('recurring-checkbox');
     const recurringOptions = document.getElementById('recurring-options');
     const installmentTotal = document.getElementById('installment-total');
+    const installmentTotalInput = document.getElementById('installment-total');
 
     if (recurringCheckbox && recurringOptions) {
         recurringCheckbox.addEventListener('change', () => {
