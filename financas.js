@@ -7,7 +7,7 @@ let myCategoryChart = null;
 let currentlyEditingItem = null;
 let transactionModal = null;
 let budgetsModal = null;
-let transactionData = JSON.parse(localStorage.getItem('transactionData')) || [];
+// Removido: variável não utilizada - dados são carregados via loadSavedData()
 
 // Objeto para guardar os orçamentos com persistência
 let budgets = {}; // Estrutura nova: { 'YYYY-MM': { Categoria: valor } } com compatibilidade legado
@@ -17,7 +17,8 @@ const STORAGE_KEYS = {
     TRANSACTIONS: 'finance_transactions',
     BUDGETS: 'finance_budgets',
     SETTINGS: 'finance_settings',
-    RULES: 'finance_rules'
+    RULES: 'finance_rules',
+    SAVINGS_GOAL: 'finance_savings_goal'
 };
 
 // Funções de localStorage
@@ -68,9 +69,9 @@ function loadSavedData() {
             financeList.appendChild(listItem);
 
             if (transaction.isInstallment) {
-                listItem.dataset.isInstallment = transaction.isInstallment;
-                listItem.dataset.installmentNumber = transaction.installmentNumber;
-                listItem.dataset.totalInstallments = transaction.totalInstallments;
+                listItem.dataset.isInstallment = 'true';
+                if (transaction.installmentNumber) listItem.dataset.installmentNumber = transaction.installmentNumber.toString();
+                if (transaction.totalInstallments) listItem.dataset.totalInstallments = transaction.totalInstallments.toString();
             }
         });
     }
@@ -92,20 +93,20 @@ function saveTransactions() {
     const items = financeList.querySelectorAll('.transaction-item');
 
     items.forEach(item => {
-        transactions.push({
+        const transaction = {
             id: item.dataset.id || Date.now() + Math.random(),
             description: item.dataset.description,
             amount: parseFloat(item.dataset.amount),
             type: item.dataset.type,
             date: item.dataset.date,
             category: item.dataset.category
-        });
+        };
         if (item.dataset.isInstallment === 'true') {
-            transactionData.isInstallment = true;
-            transactionData.installmentNumber = item.dataset.installmentNumber;
-            transactionData.totalInstallments = item.dataset.totalInstallments;
+            transaction.isInstallment = true;
+            transaction.installmentNumber = parseInt(item.dataset.installmentNumber);
+            transaction.totalInstallments = parseInt(item.dataset.totalInstallments);
         }
-        transactions.push(transactionData);
+        transactions.push(transaction);
     });
 
     saveToStorage(STORAGE_KEYS.TRANSACTIONS, transactions);
@@ -138,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const yearFilter = document.getElementById('year-filter');
     const searchFilter = document.getElementById('search-filter');
     const sortFilter = document.getElementById('sort-filter');
+    const categoryFilter = document.getElementById('category-filter');
     const submitButton = document.getElementById('submit-btn');
     const modalTitle = document.getElementById('modal-title');
     const saveBudgetsBtn = document.getElementById('save-budgets-btn');
@@ -233,6 +235,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const formRow = `<div class="input-group mb-2"><span class="input-group-text" style="width: 120px;">${category}</span><input type="number" class="form-control" data-category="${category}" value="${value}" placeholder="0" min="0"></div>`;
             budgetsForm.insertAdjacentHTML('beforeend', formRow);
         });
+        
+        // Carregar meta de economia salva
+        const savingsGoalInput = document.getElementById('savings-goal-input');
+        if (savingsGoalInput) {
+            const savedGoal = loadFromStorage(STORAGE_KEYS.SAVINGS_GOAL, 0);
+            savingsGoalInput.value = savedGoal || '';
+        }
     }
 
     document.querySelector('[data-bs-target="#budgets-modal"]').addEventListener('click', populateBudgetsForm);
@@ -243,12 +252,23 @@ document.addEventListener('DOMContentLoaded', () => {
         budgets[currentPeriod] = {}; // sobrescreve somente o período atual
         inputs.forEach(input => {
             const category = input.dataset.category;
+            if (!category) return; // Pular o campo de meta de economia
             const amount = parseFloat(input.value);
             if (amount > 0) {
                 budgets[currentPeriod][category] = amount;
             }
         });
         saveBudgets(); // Salvar no localStorage
+        
+        // Salvar meta de economia
+        const savingsGoalInput = document.getElementById('savings-goal-input');
+        if (savingsGoalInput) {
+            const savingsGoal = parseFloat(savingsGoalInput.value);
+            if (!isNaN(savingsGoal) && savingsGoal >= 0) {
+                saveToStorage(STORAGE_KEYS.SAVINGS_GOAL, savingsGoal);
+            }
+        }
+        
         showToast("Orçamentos salvos com sucesso!", "success");
         budgetsModal.hide();
         filterTransactions();
@@ -265,8 +285,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const isInstallment = recurringCheckbox.checked;
         const totalInstallments = isInstallment ? parseInt(installmentTotalInput.value) : 1; // Usa o novo ID
 
-        if (!date || !description || isNaN(totalAmount) || totalAmount <= 0 || !category || (isInstallment && (isNaN(totalInstallments) || totalInstallments < 2))) {
-            showToast("Por favor, preencha todos os campos corretamente.", "warning");
+        // Validações melhoradas
+        if (!description || description.length < 2) {
+            showToast("A descrição deve ter pelo menos 2 caracteres.", "warning");
+            return;
+        }
+        if (!date) {
+            showToast("Por favor, selecione uma data.", "warning");
+            return;
+        }
+        if (isNaN(totalAmount) || totalAmount <= 0) {
+            showToast("O valor deve ser um número positivo.", "warning");
+            return;
+        }
+        if (!category) {
+            showToast("Por favor, selecione uma categoria.", "warning");
+            return;
+        }
+        if (isInstallment && (isNaN(totalInstallments) || totalInstallments < 2 || totalInstallments > 120)) {
+            showToast("O número de parcelas deve estar entre 2 e 120.", "warning");
+            return;
+        }
+        
+        // Validar data não futura demais (máx 1 ano)
+        const transactionDate = new Date(date + 'T00:00:00');
+        const today = new Date();
+        const maxDate = new Date();
+        maxDate.setFullYear(today.getFullYear() + 1);
+        if (transactionDate > maxDate) {
+            showToast("A data não pode ser mais de 1 ano no futuro.", "warning");
             return;
         }
 
@@ -340,6 +387,7 @@ document.addEventListener('DOMContentLoaded', () => {
     monthFilter.addEventListener('change', filterTransactions);
     yearFilter.addEventListener('change', filterTransactions);
     if (sortFilter) sortFilter.addEventListener('change', filterTransactions);
+    if (categoryFilter) categoryFilter.addEventListener('change', filterTransactions);
     // Debounce para reduzir re-render a cada tecla digitada
     function debounce(fn, delay = 250) {
         let timer;
@@ -390,9 +438,11 @@ function filterTransactions() {
     const monthFilter = document.getElementById('month-filter');
     const yearFilter = document.getElementById('year-filter');
     const searchFilter = document.getElementById('search-filter');
+    const categoryFilter = document.getElementById('category-filter');
     const selectedMonth = parseInt(monthFilter.value);
     const selectedYear = parseInt(yearFilter.value);
     const searchTerm = searchFilter.value.toLowerCase();
+    const selectedCategory = categoryFilter ? categoryFilter.value : '';
     // Remover cabeçalhos anteriores
     Array.from(financeList.querySelectorAll('.transaction-header')).forEach(h => h.remove());
     const transactions = Array.from(financeList.querySelectorAll('.list-group-item.transaction-item'));
@@ -404,7 +454,8 @@ function filterTransactions() {
 
     let monthlyIncome = 0, monthlyExpenses = 0, previousMonthExpenses = 0;
     const categoryTotals = {};
-    const previousMonthDate = new Date(selectedYear, selectedMonth - 1);
+    // Calcular mês anterior corretamente
+    const previousMonthDate = new Date(selectedYear, selectedMonth, 0);
     const previousMonth = previousMonthDate.getMonth();
     const previousYear = previousMonthDate.getFullYear();
 
@@ -437,7 +488,8 @@ function filterTransactions() {
         const typeLower = (transaction.dataset.type || '').toLowerCase();
         const isMonthMatch = transactionMonth === selectedMonth && transactionYear === selectedYear;
         const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm) || categoryLower.includes(searchTerm) || typeLower.includes(searchTerm);
-        if (isMonthMatch && isSearchMatch) {
+        const isCategoryMatch = selectedCategory === '' || category === selectedCategory;
+        if (isMonthMatch && isSearchMatch && isCategoryMatch) {
             transaction.style.display = 'block';
             const { amount, type, date, category } = transaction.dataset;
             const descriptionRaw = transaction.dataset.description;
@@ -549,7 +601,11 @@ function filterTransactions() {
     monthlyIncomeEl.textContent = monthlyIncome.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyExpensesEl.textContent = monthlyExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.textContent = monthlyBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    monthlyBalanceEl.className = 'h5 mb-0 ' + (monthlyBalance < 0 ? 'text-danger' : 'text-dark');
+    monthlyBalanceEl.className = 'h5 mb-0 ' + (monthlyBalance < 0 ? 'text-danger' : 'text-success');
+    
+    // Atualizar meta de economia e saúde financeira
+    updateSavingsGoal(monthlyBalance);
+    updateFinancialHealth(monthlyIncome, monthlyExpenses, monthlyBalance);
 
     expenseTrendEl.innerHTML = '';
     if (monthlyExpenses > 0 || previousMonthExpenses > 0) {
@@ -769,21 +825,54 @@ function importTransactionsFromJSON(jsonData) {
         return;
     }
     const financeList = document.getElementById('finance-list');
+    let importedCount = 0;
+    let skippedCount = 0;
+    
     jsonData.forEach(t => {
-        if (!t.date || !t.description || !t.category || typeof t.amount !== 'number' || !t.type) return;
+        // Validação mais rigorosa
+        if (!t.date || !t.description || !t.category || typeof t.amount !== 'number' || !t.type) {
+            skippedCount++;
+            return;
+        }
+        if (t.amount <= 0 || t.description.trim().length < 2) {
+            skippedCount++;
+            return;
+        }
+        if (!['Receita', 'Despesa'].includes(t.type)) {
+            skippedCount++;
+            return;
+        }
+        
         const li = document.createElement('li');
         li.className = 'list-group-item transaction-item';
         li.dataset.id = t.id || (Date.now() + Math.random());
-        li.dataset.description = t.description;
-        li.dataset.amount = String(t.amount);
+        li.dataset.description = t.description.trim();
+        li.dataset.amount = String(Math.abs(t.amount));
         li.dataset.type = t.type;
         li.dataset.date = t.date;
         li.dataset.category = t.category;
+        
+        if (t.isInstallment) {
+            li.dataset.isInstallment = 'true';
+            if (t.installmentNumber) li.dataset.installmentNumber = t.installmentNumber.toString();
+            if (t.totalInstallments) li.dataset.totalInstallments = t.totalInstallments.toString();
+        }
+        
         financeList.appendChild(li);
+        importedCount++;
     });
+    
     saveTransactions();
     filterTransactions();
-    showToast('Transações importadas (JSON).', 'success');
+    
+    if (importedCount > 0) {
+        const message = skippedCount > 0 
+            ? `${importedCount} transação(ões) importada(s), ${skippedCount} ignorada(s).`
+            : `${importedCount} transação(ões) importada(s) com sucesso!`;
+        showToast(message, skippedCount > 0 ? 'info' : 'success');
+    } else {
+        showToast('Nenhuma transação válida encontrada para importar.', 'warning');
+    }
 }
 
 // Importar transações de CSV (espera cabeçalho semelhante ao export)
@@ -890,37 +979,95 @@ function createRecurringTransactions(transaction, frequency) {
     return transactions;
 }
 
-// Função para adicionar dashboard com métricas avançadas
-function addAdvancedMetrics() {
-    const transactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, []);
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth();
-    const currentYear = currentDate.getFullYear();
-
-    // Calcular métricas
-    const monthlyTransactions = transactions.filter(t => {
-        const tDate = new Date(t.date);
-        return tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear;
-    });
-
-    const totalIncome = monthlyTransactions
-        .filter(t => t.type === 'Receita')
-        .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalExpenses = monthlyTransactions
-        .filter(t => t.type === 'Despesa')
-        .reduce((sum, t) => sum + t.amount, 0);
-
-    const balance = totalIncome - totalExpenses;
-
-    // Adicionar indicadores visuais
-    const balanceElement = document.getElementById('monthly-balance');
-    if (balanceElement) {
-        const balanceClass = balance >= 0 ? 'text-success' : 'text-danger';
-        balanceElement.className = `h5 mb-0 ${balanceClass}`;
-
-        // Adicionar emoji baseado no saldo
-        const emoji = balance >= 0 ? '💰' : '⚠️';
-        balanceElement.innerHTML = `${emoji} ${balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
+// Função para atualizar meta de economia
+function updateSavingsGoal(monthlyBalance) {
+    const savingsGoalEl = document.getElementById('savings-goal');
+    const savingsProgressEl = document.getElementById('savings-progress');
+    const savingsStatusEl = document.getElementById('savings-status');
+    
+    if (!savingsGoalEl || !savingsProgressEl || !savingsStatusEl) return;
+    
+    const savingsGoal = loadFromStorage(STORAGE_KEYS.SAVINGS_GOAL, 0);
+    
+    if (savingsGoal <= 0) {
+        savingsGoalEl.textContent = 'R$ 0,00';
+        savingsProgressEl.style.width = '0%';
+        savingsStatusEl.textContent = 'Não definida';
+        return;
     }
+    
+    savingsGoalEl.textContent = savingsGoal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const progress = Math.min((monthlyBalance / savingsGoal) * 100, 100);
+    savingsProgressEl.style.width = `${Math.max(0, progress)}%`;
+    
+    if (monthlyBalance >= savingsGoal) {
+        savingsProgressEl.className = 'progress-bar bg-success';
+        savingsStatusEl.textContent = '✅ Meta atingida!';
+        savingsStatusEl.className = 'text-success';
+    } else {
+        const remaining = savingsGoal - monthlyBalance;
+        savingsProgressEl.className = monthlyBalance >= savingsGoal * 0.75 ? 'progress-bar bg-warning' : 'progress-bar bg-danger';
+        savingsStatusEl.textContent = `Faltam ${remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
+        savingsStatusEl.className = monthlyBalance >= savingsGoal * 0.75 ? 'text-warning' : 'text-danger';
+    }
+}
+
+// Função para atualizar saúde financeira
+function updateFinancialHealth(monthlyIncome, monthlyExpenses, monthlyBalance) {
+    const healthEl = document.getElementById('financial-health');
+    const healthMessageEl = document.getElementById('health-message');
+    
+    if (!healthEl || !healthMessageEl) return;
+    
+    let healthStatus = 'excelente';
+    let healthMessage = '';
+    let healthColor = 'success';
+    
+    if (monthlyIncome === 0 && monthlyExpenses === 0) {
+        healthStatus = 'sem dados';
+        healthMessage = 'Adicione transações para análise';
+        healthColor = 'secondary';
+    } else if (monthlyIncome === 0) {
+        healthStatus = 'crítico';
+        healthMessage = 'Sem receitas registradas';
+        healthColor = 'danger';
+    } else {
+        const expenseRatio = (monthlyExpenses / monthlyIncome) * 100;
+        
+        if (expenseRatio <= 50) {
+            healthStatus = 'excelente';
+            healthMessage = 'Gastos controlados!';
+            healthColor = 'success';
+        } else if (expenseRatio <= 70) {
+            healthStatus = 'bom';
+            healthMessage = 'Gastos dentro do esperado';
+            healthColor = 'info';
+        } else if (expenseRatio <= 90) {
+            healthStatus = 'atenção';
+            healthMessage = 'Gastos elevados';
+            healthColor = 'warning';
+        } else {
+            healthStatus = 'crítico';
+            healthMessage = 'Gastos muito altos!';
+            healthColor = 'danger';
+        }
+        
+        if (monthlyBalance < 0) {
+            healthStatus = 'negativo';
+            healthMessage = 'Saldo negativo este mês';
+            healthColor = 'danger';
+        }
+    }
+    
+    const statusText = {
+        'excelente': 'Excelente',
+        'bom': 'Bom',
+        'atenção': 'Atenção',
+        'crítico': 'Crítico',
+        'negativo': 'Negativo',
+        'sem dados': 'Sem dados'
+    };
+    
+    healthEl.innerHTML = `<span class="badge bg-${healthColor}">${statusText[healthStatus]}</span>`;
+    healthMessageEl.textContent = healthMessage;
 }
