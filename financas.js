@@ -18,8 +18,24 @@ const STORAGE_KEYS = {
     BUDGETS: 'finance_budgets',
     SETTINGS: 'finance_settings',
     RULES: 'finance_rules',
-    SAVINGS_GOAL: 'finance_savings_goal'
+    SAVINGS_GOAL: 'finance_savings_goal',
+    CUSTOM_CATEGORIES: 'finance_custom_categories',
+    TEMPLATES: 'finance_templates',
+    ACCOUNTS: 'finance_accounts',
+    BACKUPS: 'finance_backups',
+    NOTIFICATIONS: 'finance_notifications'
 };
+
+// Categorias padrão com ícones
+const DEFAULT_CATEGORIES = [
+    { name: 'Alimentação', icon: 'bi-cup-hot', color: '#FF6384' },
+    { name: 'Moradia', icon: 'bi-house-door', color: '#36A2EB' },
+    { name: 'Transporte', icon: 'bi-car-front', color: '#FFCE56' },
+    { name: 'Lazer', icon: 'bi-emoji-smile', color: '#4BC0C0' },
+    { name: 'Saúde', icon: 'bi-heart-pulse', color: '#9966FF' },
+    { name: 'Trabalho', icon: 'bi-briefcase', color: '#FF9F40' },
+    { name: 'Outros', icon: 'bi-three-dots', color: '#C9CBCF' }
+];
 
 // Funções de localStorage
 function saveToStorage(key, data) {
@@ -317,13 +333,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function populateBudgetsForm() {
-        const categories = ["Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", "Trabalho", "Outros"];
+        // Usar categorias personalizadas se disponíveis
+        const categories = (typeof customCategories !== 'undefined' && customCategories.length > 0) 
+            ? customCategories.map(c => c.name)
+            : ["Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", "Trabalho", "Outros"];
+        
         budgetsForm.innerHTML = '';
         const currentPeriod = getCurrentPeriodKey(new Date(parseInt(yearFilter.value), parseInt(monthFilter.value)));
         const periodBudgets = budgets[currentPeriod] || {};
         categories.forEach(category => {
             const value = periodBudgets[category] || '';
-            const formRow = `<div class="input-group mb-2"><span class="input-group-text" style="width: 120px;">${category}</span><input type="number" class="form-control" data-category="${category}" value="${value}" placeholder="0" min="0"></div>`;
+            const catInfo = (typeof getCategoryInfo === 'function') ? getCategoryInfo(category) : null;
+            const icon = catInfo ? `<i class="bi ${catInfo.icon} me-1" style="color: ${catInfo.color}"></i>` : '';
+            const formRow = `<div class="input-group mb-2"><span class="input-group-text" style="width: 120px;">${icon}${category}</span><input type="number" class="form-control" data-category="${category}" value="${value}" placeholder="0" min="0"></div>`;
             budgetsForm.insertAdjacentHTML('beforeend', formRow);
         });
         
@@ -595,7 +617,36 @@ function filterTransactions() {
         const isMonthMatch = transactionMonth === selectedMonth && transactionYear === selectedYear;
         const isSearchMatch = searchTerm === '' || descriptionLower.includes(searchTerm) || categoryLower.includes(searchTerm) || typeLower.includes(searchTerm);
         const isCategoryMatch = selectedCategory === '' || category === selectedCategory;
-        if (isMonthMatch && isSearchMatch && isCategoryMatch) {
+        
+        // Aplicar filtros avançados se existirem
+        let passesAdvancedFilters = true;
+        if (typeof advancedSearchFilters !== 'undefined' && Object.keys(advancedSearchFilters).length > 0) {
+            const amount = parseFloat(transaction.dataset.amount);
+            const transDate = new Date(transaction.dataset.date + 'T00:00:00');
+            
+            if (advancedSearchFilters.minAmount !== null && amount < advancedSearchFilters.minAmount) {
+                passesAdvancedFilters = false;
+            }
+            if (advancedSearchFilters.maxAmount !== null && amount > advancedSearchFilters.maxAmount) {
+                passesAdvancedFilters = false;
+            }
+            if (advancedSearchFilters.startDate && transDate < new Date(advancedSearchFilters.startDate)) {
+                passesAdvancedFilters = false;
+            }
+            if (advancedSearchFilters.endDate && transDate > new Date(advancedSearchFilters.endDate + 'T23:59:59')) {
+                passesAdvancedFilters = false;
+            }
+            if (advancedSearchFilters.categories && advancedSearchFilters.categories.length > 0) {
+                if (!advancedSearchFilters.categories.includes(category)) {
+                    passesAdvancedFilters = false;
+                }
+            }
+            if (advancedSearchFilters.type && transaction.dataset.type !== advancedSearchFilters.type) {
+                passesAdvancedFilters = false;
+            }
+        }
+        
+        if (isMonthMatch && isSearchMatch && isCategoryMatch && passesAdvancedFilters) {
             transaction.style.display = 'block';
             const { amount, type, date, category } = transaction.dataset;
             const descriptionRaw = transaction.dataset.description;
@@ -775,17 +826,37 @@ function filterTransactions() {
         categoryList.innerHTML = '<li class="list-group-item">Nenhuma despesa para este mês.</li>';
     }
 
-    const chartCtx = document.getElementById('category-chart').getContext('2d');
-    if (myCategoryChart) myCategoryChart.destroy();
-    if (sortedCategories.length > 0) {
-        myCategoryChart = new Chart(chartCtx, {
-            type: 'doughnut',
-            data: {
-                labels: sortedCategories.map(cat => cat),
-                datasets: [{ data: sortedCategories.map(cat => categoryTotals[cat] || 0), backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF'], borderWidth: 0 }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
+    const chartCtx = document.getElementById('category-chart');
+    if (chartCtx) {
+        if (myCategoryChart) myCategoryChart.destroy();
+        if (sortedCategories.length > 0) {
+            // Usar cores das categorias personalizadas se disponível
+            const colors = sortedCategories.map(cat => {
+                const catInfo = (typeof getCategoryInfo === 'function') ? getCategoryInfo(cat) : null;
+                return catInfo ? catInfo.color : '#C9CBCF';
+            });
+            
+            myCategoryChart = new Chart(chartCtx.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: sortedCategories.map(cat => cat),
+                    datasets: [{ 
+                        data: sortedCategories.map(cat => categoryTotals[cat] || 0), 
+                        backgroundColor: colors.length > 0 ? colors : ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF'], 
+                        borderWidth: 0 
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+    }
+    
+    // Atualizar gráficos avançados se disponíveis
+    if (typeof createMonthlyTrendChart === 'function') {
+        setTimeout(() => createMonthlyTrendChart(), 100);
+    }
+    if (typeof updateProjections === 'function') {
+        setTimeout(() => updateProjections(), 100);
     }
 }
 

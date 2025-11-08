@@ -116,9 +116,21 @@
                     <div class="card-body">
                         <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
                             <h5 class="card-title text-primary mb-0">Todas as Transações</h5>
-                            <div class="d-flex gap-2">
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-sm btn-outline-futuristic" data-bs-toggle="modal" data-bs-target="#templates-modal" title="Templates">
+                                    <i class="bi bi-bookmark-star"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-futuristic" data-bs-toggle="modal" data-bs-target="#accounts-modal" title="Contas">
+                                    <i class="bi bi-wallet2"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-futuristic" id="advanced-search-btn" title="Pesquisa Avançada">
+                                    <i class="bi bi-funnel"></i>
+                                </button>
                                 <button class="btn btn-sm btn-outline-futuristic" id="export-data-btn" title="Exportar Dados">
                                     <i class="bi bi-download"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-futuristic" id="export-pdf-btn" title="Exportar PDF">
+                                    <i class="bi bi-file-pdf"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-futuristic" id="export-report-btn"
                                     title="Exportar Relatório Mensal">
@@ -127,7 +139,56 @@
                                 <button class="btn btn-sm btn-outline-futuristic" id="import-data-btn" title="Importar Dados">
                                     <i class="bi bi-upload"></i>
                                 </button>
+                                <button class="btn btn-sm btn-outline-info" id="backup-btn" title="Criar Backup">
+                                    <i class="bi bi-cloud-arrow-down"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-info" id="restore-btn" title="Restaurar Backup">
+                                    <i class="bi bi-cloud-arrow-up"></i>
+                                </button>
                                 <input type="file" id="import-file-input" accept=".csv,.json" style="display:none">
+                                <input type="file" id="restore-file-input" accept=".json" style="display:none">
+                            </div>
+                        </div>
+                        
+                        <!-- Pesquisa Avançada (inicialmente oculta) -->
+                        <div id="advanced-search-panel" class="card mb-3" style="display: none;">
+                            <div class="card-body">
+                                <h6 class="card-title">Pesquisa Avançada</h6>
+                                <div class="row g-2">
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Valor Mínimo</label>
+                                        <input type="number" id="search-min-amount" class="form-control form-control-sm" step="0.01" placeholder="R$ 0,00">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Valor Máximo</label>
+                                        <input type="number" id="search-max-amount" class="form-control form-control-sm" step="0.01" placeholder="R$ 0,00">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Data Inicial</label>
+                                        <input type="date" id="search-start-date" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small">Data Final</label>
+                                        <input type="date" id="search-end-date" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Categorias (múltiplas)</label>
+                                        <select id="search-categories" class="form-select form-select-sm" multiple>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Tipo</label>
+                                        <select id="search-type" class="form-select form-select-sm">
+                                            <option value="">Todos</option>
+                                            <option value="Receita">Receita</option>
+                                            <option value="Despesa">Despesa</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+                                        <button class="btn btn-sm btn-primary" id="apply-advanced-search">Aplicar Filtros</button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="clear-advanced-search">Limpar</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="filter-container d-flex flex-wrap align-items-center gap-2 mb-3">
@@ -228,7 +289,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="card shadow-sm glass">
+                <div class="card shadow-sm glass mb-3">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h5 class="card-title text-primary mb-0">Gastos por Categoria</h5>
@@ -239,6 +300,26 @@
                         </div>
                         <div class="chart-container"><canvas id="category-chart"></canvas></div>
                         <ul id="category-list" class="list-group list-group-flush mt-3"></ul>
+                    </div>
+                </div>
+                
+                <!-- Gráficos Avançados -->
+                <div class="card shadow-sm glass mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary mb-3">Evolução Mensal</h5>
+                        <div class="chart-container" style="height: 250px;">
+                            <canvas id="monthly-trend-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Projeções -->
+                <div class="card shadow-sm glass">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary mb-3">Projeções</h5>
+                        <div id="projections-content">
+                            <p class="text-muted small">Calculando projeções baseadas no histórico...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -294,19 +375,21 @@
                             <div class="d-flex gap-1 flex-wrap" id="frequent-categories-buttons"></div>
                         </div>
 
-                        <select id="finance-category" class="form-select mb-2" required>
-                            <option value="">Selecione a Categoria</option>
-                            <option>Alimentação</option>
-                            <option>Moradia</option>
-                            <option>Transporte</option>
-                            <option>Lazer</option>
-                            <option>Saúde</option>
-                            <option>Trabalho</option>
-                            <option>Outros</option>
-                        </select>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <select id="finance-category" class="form-select" required>
+                                <option value="">Selecione a Categoria</option>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-bs-toggle="modal" data-bs-target="#categories-modal" title="Gerenciar Categorias">
+                                <i class="bi bi-gear"></i>
+                            </button>
+                        </div>
                         <select id="finance-type" class="form-select mb-2" required>
                             <option value="Receita">Receita</option>
                             <option value="Despesa">Despesa</option>
+                        </select>
+                        
+                        <select id="finance-account" class="form-select mb-2">
+                            <option value="">Conta Principal</option>
                         </select>
 
                         <div class="form-check mb-3">
@@ -333,6 +416,102 @@
         </div>
     </div>
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container">
+    </div>
+
+    <!-- Modal de Categorias Personalizadas -->
+    <div class="modal fade" id="categories-modal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Gerenciar Categorias</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Adicionar Nova Categoria</label>
+                        <div class="input-group mb-2">
+                            <input type="text" id="new-category-name" class="form-control" placeholder="Nome da categoria">
+                            <select id="new-category-icon" class="form-select" style="max-width: 150px;">
+                                <option value="bi-tag">Tag</option>
+                                <option value="bi-star">Estrela</option>
+                                <option value="bi-heart">Coração</option>
+                                <option value="bi-bookmark">Marcador</option>
+                                <option value="bi-gift">Presente</option>
+                                <option value="bi-cart">Carrinho</option>
+                                <option value="bi-credit-card">Cartão</option>
+                                <option value="bi-wallet">Carteira</option>
+                            </select>
+                            <input type="color" id="new-category-color" class="form-control form-control-color" value="#6c757d" style="max-width: 80px;">
+                            <button type="button" class="btn btn-primary" id="add-category-btn">
+                                <i class="bi bi-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <hr>
+                    <div>
+                        <label class="form-label">Categorias Existentes</label>
+                        <div id="categories-list" class="list-group"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Templates -->
+    <div class="modal fade" id="templates-modal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Templates de Transações</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-sm btn-primary" id="create-template-btn">
+                            <i class="bi bi-plus-circle me-1"></i>Criar Template da Transação Atual
+                        </button>
+                    </div>
+                    <div id="templates-list" class="list-group"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Múltiplas Contas -->
+    <div class="modal fade" id="accounts-modal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Gerenciar Contas/Carteiras</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Adicionar Nova Conta</label>
+                        <div class="input-group">
+                            <input type="text" id="new-account-name" class="form-control" placeholder="Nome da conta (ex: Conta Corrente, Carteira)">
+                            <button type="button" class="btn btn-primary" id="add-account-btn">
+                                <i class="bi bi-plus"></i> Adicionar
+                            </button>
+                        </div>
+                    </div>
+                    <hr>
+                    <div>
+                        <label class="form-label">Contas Existentes</label>
+                        <div id="accounts-list" class="list-group"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
     </div>
     <div class="modal fade" id="budgets-modal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -370,6 +549,7 @@
     <script src="theme.js"></script>
     <script src="util.js"></script>
     <script src="financas.js"></script>
+    <script src="financas-advanced.js"></script>
 </body>
 
 </html>
