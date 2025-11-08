@@ -359,6 +359,61 @@ a, button { transition: transform var(--transition-fast) var(--easing), box-shad
     }
 }
 
+/* Botão Flutuante para Adicionar Transação */
+.floating-add-btn {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.floating-add-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
+}
+
+@media (max-width: 768px) {
+    .floating-add-btn {
+        bottom: 20px;
+        right: 20px;
+        width: 56px;
+        height: 56px;
+    }
+}
+
+/* Categorias Frequentes */
+.frequent-category-btn {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.75rem;
+}
+
+/* Valores Rápidos */
+.quick-amount {
+    font-size: 0.85rem;
+    min-width: 60px;
+}
+
+/* Transações de Hoje */
+#today-transactions-card {
+    border-left: 4px solid var(--accent-1);
+}
+
+#today-empty {
+    min-height: 150px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
 @media (max-width: 768px) {
     .dashboard-card {
         margin-bottom: 1rem;

@@ -44,29 +44,90 @@
     </nav>
 
     <main class="container">
+        <!-- Dashboard Diário -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card shadow-sm glass h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted small mb-2">HOJE</h6>
+                        <p id="today-income" class="h5 text-success mb-1">R$ 0,00</p>
+                        <small class="text-muted">Receitas</small>
+                        <hr class="my-2">
+                        <p id="today-expenses" class="h5 text-danger mb-1">R$ 0,00</p>
+                        <small class="text-muted">Despesas</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm glass h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted small mb-2">SALDO HOJE</h6>
+                        <p id="today-balance" class="h4 mb-0">R$ 0,00</p>
+                        <small id="today-trend" class="text-muted">-</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm glass h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted small mb-2">TRANSAÇÕES HOJE</h6>
+                        <p id="today-count" class="h4 mb-0">0</p>
+                        <small class="text-muted">Registradas</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card shadow-sm glass h-100">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted small mb-2">MÊS ATUAL</h6>
+                        <p id="month-summary" class="h6 mb-1">R$ 0,00</p>
+                        <small id="month-summary-status" class="text-muted">Saldo</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="row g-4">
             <div class="col-lg-7">
+                <!-- Transações de Hoje (Destaque) -->
+                <div class="card shadow-sm glass mb-3" id="today-transactions-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title text-primary mb-0">
+                                <i class="bi bi-calendar-day me-2"></i>Transações de Hoje
+                            </h5>
+                            <button class="btn btn-sm btn-outline-futuristic" id="quick-add-btn" data-bs-toggle="modal"
+                                data-bs-target="#transaction-modal" title="Adicionar Transação (N)">
+                                <i class="bi bi-plus-circle"></i> Rápido
+                            </button>
+                        </div>
+                        <ul id="today-transactions-list" class="list-group"></ul>
+                        <div id="today-empty" class="text-center text-muted py-4" style="display: none;">
+                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                            <p class="mb-0">Nenhuma transação hoje</p>
+                            <button class="btn btn-sm btn-primary mt-2" data-bs-toggle="modal"
+                                data-bs-target="#transaction-modal">Adicionar primeira transação</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Todas as Transações -->
                 <div class="card shadow-sm glass">
                     <div class="card-body">
                         <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-                            <h5 class="card-title text-primary mb-0">Minhas Transações</h5>
+                            <h5 class="card-title text-primary mb-0">Todas as Transações</h5>
                             <div class="d-flex gap-2">
-                                <button class="btn btn-outline-futuristic" id="export-data-btn" title="Exportar Dados">
+                                <button class="btn btn-sm btn-outline-futuristic" id="export-data-btn" title="Exportar Dados">
                                     <i class="bi bi-download"></i>
                                 </button>
-                                <button class="btn btn-outline-futuristic" id="export-report-btn"
+                                <button class="btn btn-sm btn-outline-futuristic" id="export-report-btn"
                                     title="Exportar Relatório Mensal">
                                     <i class="bi bi-file-earmark-spreadsheet"></i>
                                 </button>
-                                <button class="btn btn-outline-futuristic" id="import-data-btn" title="Importar Dados">
+                                <button class="btn btn-sm btn-outline-futuristic" id="import-data-btn" title="Importar Dados">
                                     <i class="bi bi-upload"></i>
                                 </button>
                                 <input type="file" id="import-file-input" accept=".csv,.json" style="display:none">
-                                <button class="btn btn-futuristic" data-bs-toggle="modal"
-                                    data-bs-target="#transaction-modal">
-                                    + Adicionar Nova Transação
-                                        
-                                </button>
                             </div>
                         </div>
                         <div class="filter-container d-flex flex-wrap align-items-center gap-2 mb-3">
@@ -184,6 +245,12 @@
         </div>
     </main>
 
+    <!-- Botão Flutuante para Adicionar Transação -->
+    <button class="btn btn-futuristic floating-add-btn" id="floating-add-btn" data-bs-toggle="modal"
+        data-bs-target="#transaction-modal" title="Adicionar Transação (N)">
+        <i class="bi bi-plus-lg fs-4"></i>
+    </button>
+
     <div class="modal fade" id="transaction-modal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -193,11 +260,40 @@
                 </div>
                 <div class="modal-body">
                     <form id="add-finance-form">
+                        <!-- Tipo de Transação (Botões Rápidos) -->
+                        <div class="btn-group w-100 mb-3" role="group">
+                            <input type="radio" class="btn-check" name="quick-type" id="quick-receita" value="Receita" checked>
+                            <label class="btn btn-outline-success" for="quick-receita">
+                                <i class="bi bi-arrow-up-circle me-1"></i>Receita
+                            </label>
+                            <input type="radio" class="btn-check" name="quick-type" id="quick-despesa" value="Despesa">
+                            <label class="btn btn-outline-danger" for="quick-despesa">
+                                <i class="bi bi-arrow-down-circle me-1"></i>Despesa
+                            </label>
+                        </div>
+
                         <input type="text" id="finance-description" class="form-control mb-2" placeholder="Descrição"
-                            required>
+                            required autofocus>
+                        
+                        <!-- Valores Rápidos (apenas para despesas) -->
+                        <div id="quick-amounts" class="d-flex gap-2 mb-2 flex-wrap" style="display: none;">
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-amount" data-amount="5">R$ 5</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-amount" data-amount="10">R$ 10</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-amount" data-amount="20">R$ 20</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-amount" data-amount="50">R$ 50</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary quick-amount" data-amount="100">R$ 100</button>
+                        </div>
+
                         <input type="number" id="finance-amount" class="form-control mb-2" placeholder="Valor"
                             step="0.01" required>
                         <input type="date" id="finance-date" class="form-control mb-2" required>
+                        
+                        <!-- Categorias Frequentes -->
+                        <div id="frequent-categories" class="mb-2">
+                            <small class="text-muted d-block mb-1">Categorias Frequentes:</small>
+                            <div class="d-flex gap-1 flex-wrap" id="frequent-categories-buttons"></div>
+                        </div>
+
                         <select id="finance-category" class="form-select mb-2" required>
                             <option value="">Selecione a Categoria</option>
                             <option>Alimentação</option>
@@ -228,9 +324,10 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"
-                        id="cancel-edit-btn">Cancelar</button>
-                    <button type="submit" class="btn btn-primary" form="add-finance-form" id="submit-btn">Salvar
-                        Transação</button>
+                        id="cancel-edit-btn">Cancelar (ESC)</button>
+                    <button type="submit" class="btn btn-primary" form="add-finance-form" id="submit-btn">
+                        <i class="bi bi-check-lg me-1"></i>Salvar (Enter)
+                    </button>
                 </div>
             </div>
         </div>

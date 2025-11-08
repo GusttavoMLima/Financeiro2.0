@@ -128,6 +128,25 @@ document.addEventListener('DOMContentLoaded', () => {
     transactionModal = new bootstrap.Modal(document.getElementById('transaction-modal'));
     budgetsModal = new bootstrap.Modal(document.getElementById('budgets-modal'));
 
+    // Atalhos de teclado
+    document.addEventListener('keydown', (e) => {
+        // N para nova transação (quando não está em input)
+        if (e.key === 'n' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+            e.preventDefault();
+            transactionModal.show();
+            setTimeout(() => document.getElementById('finance-description')?.focus(), 300);
+        }
+        // ESC para fechar modal
+        if (e.key === 'Escape' && transactionModal._isShown) {
+            transactionModal.hide();
+        }
+        // Enter para salvar (quando no modal)
+        if (e.key === 'Enter' && e.ctrlKey && transactionModal._isShown) {
+            e.preventDefault();
+            financeForm.dispatchEvent(new Event('submit'));
+        }
+    });
+
     // Seleção de todos os elementos do DOM
     const descriptionInput = document.getElementById('finance-description');
     const amountInput = document.getElementById('finance-amount');
@@ -151,6 +170,71 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Define a data atual como padrão no formulário de transação
     dateInput.value = new Date().toISOString().split('T')[0];
+
+    // Botões rápidos de tipo (Receita/Despesa)
+    const quickTypeRadios = document.querySelectorAll('input[name="quick-type"]');
+    quickTypeRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            typeInput.value = e.target.value;
+            updateQuickAmountsVisibility();
+            updateFrequentCategories();
+        });
+    });
+
+    // Valores rápidos
+    const quickAmountButtons = document.querySelectorAll('.quick-amount');
+    quickAmountButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            amountInput.value = btn.dataset.amount;
+            amountInput.focus();
+        });
+    });
+
+    function updateQuickAmountsVisibility() {
+        const quickAmountsDiv = document.getElementById('quick-amounts');
+        if (quickAmountsDiv) {
+            quickAmountsDiv.style.display = typeInput.value === 'Despesa' ? 'flex' : 'none';
+        }
+    }
+
+    // Categorias frequentes
+    function updateFrequentCategories() {
+        const container = document.getElementById('frequent-categories-buttons');
+        if (!container) return;
+        
+        const transactions = loadFromStorage(STORAGE_KEYS.TRANSACTIONS, []);
+        const type = typeInput.value;
+        
+        // Contar categorias por tipo
+        const categoryCount = {};
+        transactions
+            .filter(t => t.type === type)
+            .forEach(t => {
+                categoryCount[t.category] = (categoryCount[t.category] || 0) + 1;
+            });
+        
+        // Ordenar e pegar top 4
+        const topCategories = Object.entries(categoryCount)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([cat]) => cat);
+        
+        container.innerHTML = '';
+        if (topCategories.length > 0) {
+            topCategories.forEach(cat => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-sm btn-outline-secondary frequent-category-btn';
+                btn.textContent = cat;
+                btn.addEventListener('click', () => {
+                    categoryInput.value = cat;
+                });
+                container.appendChild(btn);
+            });
+        } else {
+            container.innerHTML = '<small class="text-muted">Nenhuma categoria frequente</small>';
+        }
+    }
 
     // Controle de transações recorrentes
     const recurringCheckbox = document.getElementById('recurring-checkbox');
@@ -217,12 +301,19 @@ document.addEventListener('DOMContentLoaded', () => {
         dateInput.value = new Date().toISOString().split('T')[0];
         currentlyEditingItem = null;
         modalTitle.textContent = "Adicionar Nova Transação";
-        submitButton.textContent = "Adicionar";
+        submitButton.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar (Enter)';
         submitButton.classList.remove('btn-success');
         submitButton.classList.add('btn-primary');
         if (recurringCheckbox) recurringCheckbox.checked = false;
         if (recurringOptions) recurringOptions.style.display = 'none';
         typeInput.disabled = false; // Garante que o tipo é reativado
+        
+        // Resetar botões rápidos
+        const quickReceita = document.getElementById('quick-receita');
+        if (quickReceita) quickReceita.checked = true;
+        typeInput.value = 'Receita';
+        updateQuickAmountsVisibility();
+        updateFrequentCategories();
     }
 
     function populateBudgetsForm() {
@@ -378,12 +469,25 @@ document.addEventListener('DOMContentLoaded', () => {
         saveTransactions();
         resetForm();
         filterTransactions();
+        updateTodayTransactions();
+        updateTodayDashboard();
         transactionModal.hide();
     });
 
     document.getElementById('transaction-modal').addEventListener('hidden.bs.modal', resetForm);
+    const transactionModalEl = document.getElementById('transaction-modal');
+    if (transactionModalEl) {
+        transactionModalEl.addEventListener('shown.bs.modal', () => {
+            updateFrequentCategories();
+            updateQuickAmountsVisibility();
+            setTimeout(() => document.getElementById('finance-description')?.focus(), 100);
+        });
+    }
+    
     populateFilters();
     filterTransactions();
+    updateTodayTransactions();
+    updateTodayDashboard();
     monthFilter.addEventListener('change', filterTransactions);
     yearFilter.addEventListener('change', filterTransactions);
     if (sortFilter) sortFilter.addEventListener('change', filterTransactions);
@@ -418,6 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
         checked.forEach(item => item.remove());
         saveTransactions();
         filterTransactions();
+        updateTodayTransactions();
+        updateTodayDashboard();
         showToast(`${checked.length} transação(ões) excluída(s).`, 'info');
     });
     if (bulkApplyBtn) bulkApplyBtn.addEventListener('click', () => {
@@ -606,6 +712,9 @@ function filterTransactions() {
     // Atualizar meta de economia e saúde financeira
     updateSavingsGoal(monthlyBalance);
     updateFinancialHealth(monthlyIncome, monthlyExpenses, monthlyBalance);
+    
+    // Atualizar resumo do mês
+    updateMonthSummary(monthlyBalance);
 
     expenseTrendEl.innerHTML = '';
     if (monthlyExpenses > 0 || previousMonthExpenses > 0) {
@@ -702,6 +811,8 @@ function setupFinanceActionListeners() {
             item.remove();
             saveTransactions();
             filterTransactions();
+            updateTodayTransactions();
+            updateTodayDashboard();
             showToast("Transação apagada.", "info", {
                 actionText: 'Desfazer',
                 delay: 6000,
@@ -1070,4 +1181,123 @@ function updateFinancialHealth(monthlyIncome, monthlyExpenses, monthlyBalance) {
     
     healthEl.innerHTML = `<span class="badge bg-${healthColor}">${statusText[healthStatus]}</span>`;
     healthMessageEl.textContent = healthMessage;
+}
+
+// Função para atualizar transações de hoje
+function updateTodayTransactions() {
+    const todayList = document.getElementById('today-transactions-list');
+    const todayEmpty = document.getElementById('today-empty');
+    if (!todayList) return;
+    
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const financeList = document.getElementById('finance-list');
+    const allItems = Array.from(financeList.querySelectorAll('.transaction-item'));
+    
+    const todayItems = allItems.filter(item => item.dataset.date === todayStr);
+    
+    todayList.innerHTML = '';
+    
+    if (todayItems.length === 0) {
+        if (todayEmpty) todayEmpty.style.display = 'block';
+        return;
+    }
+    
+    if (todayEmpty) todayEmpty.style.display = 'none';
+    
+    todayItems.forEach(item => {
+        const clone = item.cloneNode(true);
+        clone.style.display = 'block';
+        todayList.appendChild(clone);
+    });
+    
+    // Reaplicar listeners
+    setupFinanceActionListeners();
+}
+
+// Função para atualizar dashboard diário
+function updateTodayDashboard() {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const financeList = document.getElementById('finance-list');
+    const allItems = Array.from(financeList.querySelectorAll('.transaction-item'));
+    
+    const todayItems = allItems.filter(item => item.dataset.date === todayStr);
+    
+    let todayIncome = 0;
+    let todayExpenses = 0;
+    let todayCount = 0;
+    
+    todayItems.forEach(item => {
+        const amount = parseFloat(item.dataset.amount);
+        const type = item.dataset.type;
+        todayCount++;
+        
+        if (type === 'Receita') {
+            todayIncome += amount;
+        } else {
+            todayExpenses += amount;
+        }
+    });
+    
+    const todayBalance = todayIncome - todayExpenses;
+    
+    // Atualizar elementos
+    const todayIncomeEl = document.getElementById('today-income');
+    const todayExpensesEl = document.getElementById('today-expenses');
+    const todayBalanceEl = document.getElementById('today-balance');
+    const todayCountEl = document.getElementById('today-count');
+    const todayTrendEl = document.getElementById('today-trend');
+    
+    if (todayIncomeEl) todayIncomeEl.textContent = todayIncome.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (todayExpensesEl) todayExpensesEl.textContent = todayExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (todayBalanceEl) {
+        todayBalanceEl.textContent = todayBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        todayBalanceEl.className = 'h4 mb-0 ' + (todayBalance >= 0 ? 'text-success' : 'text-danger');
+    }
+    if (todayCountEl) todayCountEl.textContent = todayCount;
+    
+    // Calcular tendência (comparar com ontem)
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    const yesterdayItems = allItems.filter(item => item.dataset.date === yesterdayStr);
+    
+    let yesterdayExpenses = 0;
+    yesterdayItems.forEach(item => {
+        if (item.dataset.type === 'Despesa') {
+            yesterdayExpenses += parseFloat(item.dataset.amount);
+        }
+    });
+    
+    if (todayTrendEl && yesterdayExpenses > 0) {
+        const diff = todayExpenses - yesterdayExpenses;
+        const percent = ((diff / yesterdayExpenses) * 100).toFixed(1);
+        if (diff > 0) {
+            todayTrendEl.textContent = `↑ ${Math.abs(percent)}% vs ontem`;
+            todayTrendEl.className = 'text-danger';
+        } else if (diff < 0) {
+            todayTrendEl.textContent = `↓ ${Math.abs(percent)}% vs ontem`;
+            todayTrendEl.className = 'text-success';
+        } else {
+            todayTrendEl.textContent = '= vs ontem';
+            todayTrendEl.className = 'text-muted';
+        }
+    } else if (todayTrendEl) {
+        todayTrendEl.textContent = '-';
+        todayTrendEl.className = 'text-muted';
+    }
+}
+
+// Função para atualizar resumo do mês
+function updateMonthSummary(monthlyBalance) {
+    const monthSummaryEl = document.getElementById('month-summary');
+    const monthSummaryStatusEl = document.getElementById('month-summary-status');
+    
+    if (!monthSummaryEl || !monthSummaryStatusEl) return;
+    
+    monthSummaryEl.textContent = monthlyBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    monthSummaryEl.className = 'h6 mb-1 ' + (monthlyBalance >= 0 ? 'text-success' : 'text-danger');
+    monthSummaryStatusEl.textContent = monthlyBalance >= 0 ? 'Saldo positivo' : 'Saldo negativo';
+    monthSummaryStatusEl.className = monthlyBalance >= 0 ? 'text-success' : 'text-danger';
 }
