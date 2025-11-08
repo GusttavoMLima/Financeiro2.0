@@ -272,6 +272,23 @@
                         <hr class="my-3">
                         <div class="row text-center">
                             <div class="col-6 border-end">
+                                <h6 class="text-muted small mb-2">
+                                    <i class="bi bi-credit-card me-1"></i>SALDO CARTÃO
+                                </h6>
+                                <p id="card-balance" class="h4 mb-1 text-primary">R$ 0,00</p>
+                                <small id="card-available" class="text-muted">Disponível</small>
+                            </div>
+                            <div class="col-6">
+                                <h6 class="text-muted small mb-2">
+                                    <i class="bi bi-cash-coin me-1"></i>SALDO VALE
+                                </h6>
+                                <p id="cash-balance" class="h4 mb-1 text-info">R$ 0,00</p>
+                                <small id="cash-available" class="text-muted">Disponível</small>
+                            </div>
+                        </div>
+                        <hr class="my-3">
+                        <div class="row text-center">
+                            <div class="col-6 border-end">
                                 <h6 class="text-muted small">META DE ECONOMIA</h6>
                                 <p id="savings-goal" class="h6 mb-1">R$ 0,00</p>
                                 <div class="progress" style="height: 6px;">
@@ -386,6 +403,11 @@
                         <select id="finance-type" class="form-select mb-2" required>
                             <option value="Receita">Receita</option>
                             <option value="Despesa">Despesa</option>
+                        </select>
+                        
+                        <select id="finance-source" class="form-select mb-2" required>
+                            <option value="Cartão" selected>Salário/Cartão</option>
+                            <option value="Dinheiro">Vale/Dinheiro</option>
                         </select>
                         
                         <select id="finance-account" class="form-select mb-2">

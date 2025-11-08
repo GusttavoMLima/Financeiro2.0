@@ -82,6 +82,12 @@ function loadSavedData() {
             listItem.dataset.date = transaction.date;
             listItem.dataset.category = transaction.category;
             listItem.dataset.id = transaction.id;
+            // Suporte para fonte (compatibilidade com dados antigos)
+            if (transaction.source) {
+                listItem.dataset.source = transaction.source;
+            } else {
+                listItem.dataset.source = 'Cartão'; // Padrão para dados antigos
+            }
             financeList.appendChild(listItem);
 
             if (transaction.isInstallment) {
@@ -115,7 +121,8 @@ function saveTransactions() {
             amount: parseFloat(item.dataset.amount),
             type: item.dataset.type,
             date: item.dataset.date,
-            category: item.dataset.category
+            category: item.dataset.category,
+            source: item.dataset.source || 'Cartão' // Padrão: Cartão
         };
         if (item.dataset.isInstallment === 'true') {
             transaction.isInstallment = true;
@@ -169,6 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const typeInput = document.getElementById('finance-type');
     const dateInput = document.getElementById('finance-date');
     const categoryInput = document.getElementById('finance-category');
+    const sourceInput = document.getElementById('finance-source');
     const financeList = document.getElementById('finance-list');
     const monthFilter = document.getElementById('month-filter');
     const yearFilter = document.getElementById('year-filter');
@@ -357,6 +365,12 @@ document.addEventListener('DOMContentLoaded', () => {
             quickDespesa.checked = false;
         }
         typeInput.value = 'Receita';
+        // Resetar fonte para padrão (após o reset do form)
+        setTimeout(() => {
+            if (sourceInput) {
+                sourceInput.value = 'Cartão';
+            }
+        }, 0);
         updateQuickAmountsVisibility();
         updateFrequentCategories();
     }
@@ -435,6 +449,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const date = dateInput.value;
         const category = categoryInput.value;
+        const source = sourceInput && sourceInput.value ? sourceInput.value : 'Cartão'; // Padrão: Cartão
+        // Validar se a fonte é válida
+        if (!source || source === '' || (source !== 'Cartão' && source !== 'Dinheiro')) {
+            showToast("Por favor, selecione uma fonte válida (Salário/Cartão ou Vale/Dinheiro).", "warning");
+            if (sourceInput) sourceInput.focus();
+            return;
+        }
         const isInstallment = recurringCheckbox.checked;
         const totalInstallments = isInstallment ? parseInt(installmentTotalInput.value) : 1; // Usa o novo ID
 
@@ -493,6 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 listItem.dataset.type = type; // Usar o tipo capturado do formulário
                 listItem.dataset.date = date;
                 listItem.dataset.category = category;
+                listItem.dataset.source = source; // Fonte: Cartão ou Dinheiro
                 financeList.appendChild(listItem);
                 transactionsAddedCount = 1;
             } else {
@@ -517,6 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     listItem.dataset.type = 'Despesa';
                     listItem.dataset.date = installmentDateString;
                     listItem.dataset.category = category;
+                    listItem.dataset.source = source; // Fonte da parcela
                     listItem.dataset.isInstallment = 'true';
                     listItem.dataset.installmentNumber = i + 1;
                     listItem.dataset.totalInstallments = totalInstallments;
@@ -536,6 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentlyEditingItem.dataset.type = type;
             currentlyEditingItem.dataset.date = date;
             currentlyEditingItem.dataset.category = category;
+            currentlyEditingItem.dataset.source = source;
             delete currentlyEditingItem.dataset.isInstallment;
             delete currentlyEditingItem.dataset.installmentNumber;
             delete currentlyEditingItem.dataset.totalInstallments;
@@ -702,9 +726,10 @@ function filterTransactions() {
         
         if (isMonthMatch && isSearchMatch && isCategoryMatch && passesAdvancedFilters) {
             transaction.style.display = 'block';
-            const { amount, type, date, category } = transaction.dataset;
+            const { amount, type, date, category, source } = transaction.dataset;
             const descriptionRaw = transaction.dataset.description;
             const numAmount = parseFloat(amount);
+            const transactionSource = source || 'Cartão';
 
             // Renderização segura sem innerHTML
             const formattedDate = new Date(date).toLocaleDateString('pt-BR');
@@ -745,6 +770,11 @@ function filterTransactions() {
             meta.appendChild(document.createTextNode(formattedDate + ' • '));
             meta.appendChild(tagIcon);
             meta.appendChild(document.createTextNode(category));
+            // Adicionar badge da fonte
+            const sourceBadge = document.createElement('span');
+            sourceBadge.className = 'badge ms-2 ' + (transactionSource === 'Cartão' ? 'bg-primary' : 'bg-info');
+            sourceBadge.textContent = transactionSource === 'Cartão' ? '💳 Cartão' : '💵 Dinheiro';
+            meta.appendChild(sourceBadge);
             leftTextWrap.appendChild(title);
             leftTextWrap.appendChild(meta);
             left.appendChild(check);
@@ -813,6 +843,56 @@ function filterTransactions() {
     monthlyExpensesEl.textContent = monthlyExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.textContent = monthlyBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.className = 'h5 mb-0 ' + (monthlyBalance < 0 ? 'text-danger' : 'text-success');
+    
+    // Calcular saldos separados por fonte
+    let cardIncome = 0, cardExpenses = 0;
+    let cashIncome = 0, cashExpenses = 0;
+    
+    transactions.forEach(transaction => {
+        const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
+        const transactionMonth = transactionDate.getMonth();
+        const transactionYear = transactionDate.getFullYear();
+        const source = transaction.dataset.source || 'Cartão';
+        const amount = parseFloat(transaction.dataset.amount);
+        const type = transaction.dataset.type;
+        
+        if (transactionMonth === selectedMonth && transactionYear === selectedYear) {
+            if (source === 'Cartão') {
+                if (type === 'Receita') cardIncome += amount;
+                else cardExpenses += amount;
+            } else {
+                if (type === 'Receita') cashIncome += amount;
+                else cashExpenses += amount;
+            }
+        }
+    });
+    
+    const cardBalance = cardIncome - cardExpenses;
+    const cashBalance = cashIncome - cashExpenses;
+    
+    // Atualizar saldos separados
+    const cardBalanceEl = document.getElementById('card-balance');
+    const cardAvailableEl = document.getElementById('card-available');
+    const cashBalanceEl = document.getElementById('cash-balance');
+    const cashAvailableEl = document.getElementById('cash-available');
+    
+    if (cardBalanceEl) {
+        cardBalanceEl.textContent = cardBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        cardBalanceEl.className = 'h4 mb-1 ' + (cardBalance >= 0 ? 'text-success' : 'text-danger');
+    }
+    if (cardAvailableEl) {
+        cardAvailableEl.textContent = cardBalance >= 0 ? 'Disponível no cartão' : 'Limite ultrapassado';
+        cardAvailableEl.className = cardBalance >= 0 ? 'text-success' : 'text-danger';
+    }
+    
+    if (cashBalanceEl) {
+        cashBalanceEl.textContent = cashBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        cashBalanceEl.className = 'h4 mb-1 ' + (cashBalance >= 0 ? 'text-info' : 'text-danger');
+    }
+    if (cashAvailableEl) {
+        cashAvailableEl.textContent = cashBalance >= 0 ? 'Disponível em dinheiro' : 'Saldo negativo';
+        cashAvailableEl.className = cashBalance >= 0 ? 'text-info' : 'text-danger';
+    }
     
     // Atualizar meta de economia e saúde financeira
     updateSavingsGoal(monthlyBalance);
@@ -951,6 +1031,7 @@ function setupFinanceActionListeners() {
                     li.dataset.type = deleted.type;
                     li.dataset.date = deleted.date;
                     li.dataset.category = deleted.category;
+                    if (deleted.source) li.dataset.source = deleted.source;
                     document.getElementById('finance-list').appendChild(li);
                     saveTransactions();
                     filterTransactions();
@@ -970,6 +1051,9 @@ function setupFinanceActionListeners() {
             document.getElementById('finance-type').value = type;
             document.getElementById('finance-date').value = date;
             document.getElementById('finance-category').value = category;
+            if (sourceInput) {
+                sourceInput.value = item.dataset.source || 'Cartão';
+            }
             const submitButton = document.getElementById('submit-btn');
             const modalTitle = document.getElementById('modal-title');
             modalTitle.textContent = "Editar Transação";
@@ -1087,6 +1171,7 @@ function importTransactionsFromJSON(jsonData) {
         li.dataset.type = t.type;
         li.dataset.date = t.date;
         li.dataset.category = t.category;
+        li.dataset.source = t.source || 'Cartão';
         
         if (t.isInstallment) {
             li.dataset.isInstallment = 'true';
@@ -1143,6 +1228,7 @@ function importTransactionsFromCSV(text) {
         li.dataset.type = type;
         li.dataset.date = normalizeDate(dateStr);
         li.dataset.category = cat;
+        li.dataset.source = 'Cartão'; // Padrão para importação CSV
         financeList.appendChild(li);
     }
     saveTransactions();
