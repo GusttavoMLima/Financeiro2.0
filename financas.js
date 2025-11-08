@@ -191,11 +191,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const quickTypeRadios = document.querySelectorAll('input[name="quick-type"]');
     quickTypeRadios.forEach(radio => {
         radio.addEventListener('change', (e) => {
-            typeInput.value = e.target.value;
+            const selectedType = e.target.value;
+            typeInput.value = selectedType;
+            // Sincronizar botões rápidos com o select
+            if (selectedType === 'Receita') {
+                document.getElementById('quick-receita').checked = true;
+                document.getElementById('quick-despesa').checked = false;
+            } else {
+                document.getElementById('quick-receita').checked = false;
+                document.getElementById('quick-despesa').checked = true;
+            }
             updateQuickAmountsVisibility();
             updateFrequentCategories();
         });
     });
+    
+    // Sincronizar select com botões rápidos quando o select mudar
+    if (typeInput) {
+        typeInput.addEventListener('change', (e) => {
+            const selectedType = e.target.value;
+            if (selectedType === 'Receita') {
+                const quickReceita = document.getElementById('quick-receita');
+                if (quickReceita) quickReceita.checked = true;
+            } else {
+                const quickDespesa = document.getElementById('quick-despesa');
+                if (quickDespesa) quickDespesa.checked = true;
+            }
+            updateQuickAmountsVisibility();
+            updateFrequentCategories();
+        });
+    }
 
     // Valores rápidos
     const quickAmountButtons = document.querySelectorAll('.quick-amount');
@@ -324,9 +349,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (recurringOptions) recurringOptions.style.display = 'none';
         typeInput.disabled = false; // Garante que o tipo é reativado
         
-        // Resetar botões rápidos
+        // Resetar botões rápidos e sincronizar
         const quickReceita = document.getElementById('quick-receita');
-        if (quickReceita) quickReceita.checked = true;
+        const quickDespesa = document.getElementById('quick-despesa');
+        if (quickReceita) {
+            quickReceita.checked = true;
+            quickDespesa.checked = false;
+        }
         typeInput.value = 'Receita';
         updateQuickAmountsVisibility();
         updateFrequentCategories();
@@ -392,7 +421,18 @@ document.addEventListener('DOMContentLoaded', () => {
         event.preventDefault();
         const description = descriptionInput.value.trim();
         const totalAmount = parseFloat(amountInput.value);
-        const type = typeInput.value;
+        // Capturar tipo do select (garantir que está sincronizado)
+        let type = typeInput.value;
+        // Se os botões rápidos estiverem disponíveis, verificar qual está selecionado
+        const quickReceita = document.getElementById('quick-receita');
+        const quickDespesa = document.getElementById('quick-despesa');
+        if (quickReceita && quickReceita.checked) {
+            type = 'Receita';
+            typeInput.value = 'Receita';
+        } else if (quickDespesa && quickDespesa.checked) {
+            type = 'Despesa';
+            typeInput.value = 'Despesa';
+        }
         const date = dateInput.value;
         const category = categoryInput.value;
         const isInstallment = recurringCheckbox.checked;
@@ -443,32 +483,46 @@ document.addEventListener('DOMContentLoaded', () => {
             const startDate = new Date(date + 'T00:00:00');
             let transactionsAddedCount = 0;
 
-            for (let i = 0; i < totalInstallments; i++) {
-                const installmentDate = new Date(startDate);
-                installmentDate.setMonth(startDate.getMonth() + i);
-
-                const year = installmentDate.getFullYear();
-                const month = (installmentDate.getMonth() + 1).toString().padStart(2, '0');
-                const day = installmentDate.getDate().toString().padStart(2, '0');
-                const installmentDateString = `${year}-${month}-${day}`;
-
-                const installmentDescription = isInstallment ? `${description} (${i + 1}/${totalInstallments})` : description;
-
+            // Se não for parcela, criar apenas uma transação
+            if (!isInstallment) {
                 const listItem = document.createElement('li');
                 listItem.className = 'list-group-item transaction-item';
-                listItem.dataset.id = Date.now() + Math.random() + i;
-                listItem.dataset.description = installmentDescription;
-                listItem.dataset.amount = installmentAmount;
-                listItem.dataset.type = 'Despesa'; // Parcela é sempre despesa
-                listItem.dataset.date = installmentDateString;
+                listItem.dataset.id = Date.now() + Math.random();
+                listItem.dataset.description = description;
+                listItem.dataset.amount = totalAmount;
+                listItem.dataset.type = type; // Usar o tipo capturado do formulário
+                listItem.dataset.date = date;
                 listItem.dataset.category = category;
-                if (isInstallment) {
+                financeList.appendChild(listItem);
+                transactionsAddedCount = 1;
+            } else {
+                // Se for parcela, criar múltiplas transações
+                for (let i = 0; i < totalInstallments; i++) {
+                    const installmentDate = new Date(startDate);
+                    installmentDate.setMonth(startDate.getMonth() + i);
+
+                    const year = installmentDate.getFullYear();
+                    const month = (installmentDate.getMonth() + 1).toString().padStart(2, '0');
+                    const day = installmentDate.getDate().toString().padStart(2, '0');
+                    const installmentDateString = `${year}-${month}-${day}`;
+
+                    const installmentDescription = `${description} (${i + 1}/${totalInstallments})`;
+
+                    const listItem = document.createElement('li');
+                    listItem.className = 'list-group-item transaction-item';
+                    listItem.dataset.id = Date.now() + Math.random() + i;
+                    listItem.dataset.description = installmentDescription;
+                    listItem.dataset.amount = installmentAmount;
+                    // Parcelas são sempre despesas
+                    listItem.dataset.type = 'Despesa';
+                    listItem.dataset.date = installmentDateString;
+                    listItem.dataset.category = category;
                     listItem.dataset.isInstallment = 'true';
                     listItem.dataset.installmentNumber = i + 1;
                     listItem.dataset.totalInstallments = totalInstallments;
+                    financeList.appendChild(listItem);
+                    transactionsAddedCount++;
                 }
-                financeList.appendChild(listItem);
-                transactionsAddedCount++;
             }
             if (isInstallment) {
                 showToast(`${transactionsAddedCount} parcelas adicionadas!`, "success");
