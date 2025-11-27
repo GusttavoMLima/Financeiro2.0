@@ -991,6 +991,16 @@ function filterTransactions() {
     const cardBalance = cardIncome - cardExpenses;
     const cashBalance = cashIncome - cashExpenses;
     
+    // Atualizar receitas separadas
+    const cardIncomeEl = document.getElementById('card-income');
+    const cashIncomeEl = document.getElementById('cash-income');
+    if (cardIncomeEl) {
+        cardIncomeEl.textContent = cardIncome.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    if (cashIncomeEl) {
+        cashIncomeEl.textContent = cashIncome.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    
     // Atualizar despesas separadas
     const cardExpensesEl = document.getElementById('card-expenses');
     const cashExpensesEl = document.getElementById('cash-expenses');
