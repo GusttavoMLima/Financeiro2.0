@@ -254,19 +254,36 @@
             <div class="col-lg-5">
                 <div class="card shadow-sm mb-4 glass">
                     <div class="card-body">
-                        <div class="row text-center">
+                        <!-- Primeira linha: Receitas, Saldo e Despesas Total -->
+                        <div class="row text-center mb-3">
                             <div class="col-4 border-end">
-                                <h6 class="text-muted small">RECEITAS</h6>
-                                <p id="monthly-income" class="h5 text-success mb-0">R$ 0,00</p>
+                                <h6 class="text-muted small mb-2">RECEITAS</h6>
+                                <p id="monthly-income" class="h4 text-success mb-0 fw-bold">R$ 0,00</p>
                             </div>
                             <div class="col-4 border-end">
-                                <h6 class="text-muted small">DESPESAS</h6>
-                                <p id="monthly-expenses" class="h5 text-danger mb-0">R$ 0,00</p>
-                                <p id="expense-trend" class="small mt-1 mb-0 text-muted"></p>
+                                <h6 class="text-muted small mb-2">SALDO MENSAL</h6>
+                                <p id="monthly-balance" class="h4 mb-0 fw-bold">R$ 0,00</p>
                             </div>
                             <div class="col-4">
-                                <h6 class="text-muted small">SALDO</h6>
-                                <p id="monthly-balance" class="h5 mb-0">R$ 0,00</p>
+                                <h6 class="text-muted small mb-2">DESPESAS TOTAL</h6>
+                                <p id="monthly-expenses" class="h4 text-danger mb-0 fw-bold">R$ 0,00</p>
+                                <p id="expense-trend" class="small mt-1 mb-0 text-muted"></p>
+                            </div>
+                        </div>
+                        <hr class="my-3">
+                        <!-- Segunda linha: Despesas detalhadas -->
+                        <div class="row text-center">
+                            <div class="col-6 border-end">
+                                <h6 class="text-muted small mb-2">
+                                    <i class="bi bi-credit-card me-1"></i>DESPESAS CARTÃO
+                                </h6>
+                                <p id="card-expenses" class="h5 text-danger mb-0 fw-bold">R$ 0,00</p>
+                            </div>
+                            <div class="col-6">
+                                <h6 class="text-muted small mb-2">
+                                    <i class="bi bi-cash-coin me-1"></i>DESPESAS DINHEIRO
+                                </h6>
+                                <p id="cash-expenses" class="h5 text-danger mb-0 fw-bold">R$ 0,00</p>
                             </div>
                         </div>
                         <hr class="my-3">
@@ -277,6 +294,7 @@
                                 </h6>
                                 <p id="card-balance" class="h4 mb-1 text-primary">R$ 0,00</p>
                                 <small id="card-available" class="text-muted">Disponível</small>
+                                <div id="card-available-detail" class="mt-1"></div>
                             </div>
                             <div class="col-6">
                                 <h6 class="text-muted small mb-2">
@@ -284,6 +302,24 @@
                                 </h6>
                                 <p id="cash-balance" class="h4 mb-1 text-info">R$ 0,00</p>
                                 <small id="cash-available" class="text-muted">Disponível</small>
+                            </div>
+                        </div>
+                        <hr class="my-3">
+                        <div class="row text-center">
+                            <div class="col-12">
+                                <h6 class="text-muted small mb-2">
+                                    <i class="bi bi-calendar-week me-1"></i>ORÇAMENTO SEMANAL
+                                </h6>
+                                <p id="weekly-budget" class="h3 mb-1 text-warning">R$ 0,00</p>
+                                <small id="weekly-info" class="text-muted d-block mb-1">-</small>
+                                <div class="mt-2">
+                                    <small class="text-muted d-block mb-1">Gastos desta semana:</small>
+                                    <p id="weekly-spent" class="h5 mb-1">R$ 0,00</p>
+                                    <p id="weekly-remaining" class="h4 mb-1">R$ 0,00 restantes</p>
+                                </div>
+                                <div class="mt-2">
+                                    <small id="days-until-closing" class="badge bg-info">-</small>
+                                </div>
                             </div>
                         </div>
                         <hr class="my-3">

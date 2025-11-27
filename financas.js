@@ -5,6 +5,7 @@
 
 let myCategoryChart = null;
 let currentlyEditingItem = null;
+let currentlyEditingInstallments = []; // Array para armazenar todas as parcelas sendo editadas
 let transactionModal = null;
 let budgetsModal = null;
 // Removido: variável não utilizada - dados são carregados via loadSavedData()
@@ -146,6 +147,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Carregar dados salvos
     loadSavedData();
+    
+    // Variável para rastrear a semana atual
+    let currentWeekKey = getWeekKey(new Date());
+    
+    // Função para obter chave da semana (ano-semana)
+    function getWeekKey(date) {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        const day = d.getDay(); // 0 = domingo, 6 = sábado
+        const diff = d.getDate() - day; // Diferença até domingo
+        const sunday = new Date(d);
+        sunday.setDate(diff);
+        // Retornar chave única da semana (ano + número da semana)
+        const year = sunday.getFullYear();
+        const startOfYear = new Date(year, 0, 1);
+        const days = Math.floor((sunday - startOfYear) / (24 * 60 * 60 * 1000));
+        const weekNumber = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+        return `${year}-W${weekNumber}`;
+    }
+    
+    // Função para verificar se mudou de semana e atualizar
+    function checkWeekChange() {
+        const now = new Date();
+        const newWeekKey = getWeekKey(now);
+        
+        if (newWeekKey !== currentWeekKey) {
+            currentWeekKey = newWeekKey;
+            // Semana mudou, atualizar dashboard
+            filterTransactions();
+            updateTodayDashboard();
+            showToast('Nova semana iniciada! Orçamento semanal atualizado.', 'info');
+        }
+    }
+    
+    // Verificar mudança de semana periodicamente
+    // Verificar a cada minuto normalmente, mas mais frequentemente próximo da meia-noite
+    function scheduleNextCheck() {
+        const now = new Date();
+        const minutesUntilMidnight = (24 * 60) - (now.getHours() * 60 + now.getMinutes());
+        
+        // Se estiver próximo da meia-noite (últimos 5 minutos), verificar a cada 10 segundos
+        if (minutesUntilMidnight <= 5) {
+            setTimeout(() => {
+                checkWeekChange();
+                scheduleNextCheck();
+            }, 10000); // 10 segundos
+        } else {
+            // Caso contrário, verificar a cada minuto
+            setTimeout(() => {
+                checkWeekChange();
+                scheduleNextCheck();
+            }, 60000); // 60 segundos
+        }
+    }
+    
+    // Iniciar verificação periódica
+    scheduleNextCheck();
+    
+    // Verificar quando a página ganha foco (usuário volta para a aba)
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            checkWeekChange();
+        }
+    });
+    
+    // Verificar quando a janela ganha foco
+    window.addEventListener('focus', checkWeekChange);
 
     // Inicializa os Modals do Bootstrap
     transactionModal = new bootstrap.Modal(document.getElementById('transaction-modal'));
@@ -349,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         financeForm.reset();
         dateInput.value = new Date().toISOString().split('T')[0];
         currentlyEditingItem = null;
+        currentlyEditingInstallments = []; // Resetar array de parcelas
         modalTitle.textContent = "Adicionar Nova Transação";
         submitButton.innerHTML = '<i class="bi bi-check-lg me-1"></i>Salvar (Enter)';
         submitButton.classList.remove('btn-success');
@@ -491,11 +560,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (currentlyEditingItem && currentlyEditingItem.dataset.isInstallment === 'true') {
-            showToast("Não é possível editar uma parcela individualmente.", "warning");
-            return;
-        }
-
         const successMessage = currentlyEditingItem ? "Transação atualizada!" : "Transação adicionada!";
 
         if (currentlyEditingItem === null) {
@@ -553,17 +617,74 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(successMessage, "success");
             }
         } else {
-            // LÓGICA DE EDITAR (sem alterações)
-            currentlyEditingItem.dataset.description = description;
-            currentlyEditingItem.dataset.amount = totalAmount;
-            currentlyEditingItem.dataset.type = type;
-            currentlyEditingItem.dataset.date = date;
-            currentlyEditingItem.dataset.category = category;
-            currentlyEditingItem.dataset.source = source;
-            delete currentlyEditingItem.dataset.isInstallment;
-            delete currentlyEditingItem.dataset.installmentNumber;
-            delete currentlyEditingItem.dataset.totalInstallments;
-            showToast(successMessage, "success");
+            // LÓGICA DE EDITAR
+            if (currentlyEditingInstallments.length > 0) {
+                // Editar compra parcelada - atualizar todas as parcelas
+                const isInstallment = recurringCheckbox.checked;
+                const newTotalInstallments = isInstallment ? parseInt(installmentTotalInput.value) : 1;
+                const installmentAmount = isInstallment ? parseFloat((totalAmount / newTotalInstallments).toFixed(2)) : totalAmount;
+                const startDate = new Date(date + 'T00:00:00');
+                
+                // Remover parcelas antigas
+                currentlyEditingInstallments.forEach(item => {
+                    item.remove();
+                });
+                
+                if (isInstallment && newTotalInstallments >= 2) {
+                    // Recriar todas as parcelas com novos dados
+                    for (let i = 0; i < newTotalInstallments; i++) {
+                        const installmentDate = new Date(startDate);
+                        installmentDate.setMonth(startDate.getMonth() + i);
+                        
+                        const year = installmentDate.getFullYear();
+                        const month = (installmentDate.getMonth() + 1).toString().padStart(2, '0');
+                        const day = installmentDate.getDate().toString().padStart(2, '0');
+                        const installmentDateString = `${year}-${month}-${day}`;
+                        
+                        const installmentDescription = `${description} (${i + 1}/${newTotalInstallments})`;
+                        
+                        const listItem = document.createElement('li');
+                        listItem.className = 'list-group-item transaction-item';
+                        listItem.dataset.id = Date.now() + Math.random() + i;
+                        listItem.dataset.description = installmentDescription;
+                        listItem.dataset.amount = installmentAmount;
+                        listItem.dataset.type = 'Despesa';
+                        listItem.dataset.date = installmentDateString;
+                        listItem.dataset.category = category;
+                        listItem.dataset.source = source;
+                        listItem.dataset.isInstallment = 'true';
+                        listItem.dataset.installmentNumber = i + 1;
+                        listItem.dataset.totalInstallments = newTotalInstallments;
+                        financeList.appendChild(listItem);
+                    }
+                    showToast(`${newTotalInstallments} parcelas atualizadas!`, "success");
+                } else {
+                    // Converter de parcelada para transação única
+                    const listItem = document.createElement('li');
+                    listItem.className = 'list-group-item transaction-item';
+                    listItem.dataset.id = Date.now() + Math.random();
+                    listItem.dataset.description = description;
+                    listItem.dataset.amount = totalAmount;
+                    listItem.dataset.type = type;
+                    listItem.dataset.date = date;
+                    listItem.dataset.category = category;
+                    listItem.dataset.source = source;
+                    financeList.appendChild(listItem);
+                    showToast("Compra parcelada convertida em transação única!", "success");
+                }
+            } else {
+                // Editar transação única normal
+                currentlyEditingItem.dataset.description = description;
+                currentlyEditingItem.dataset.amount = totalAmount;
+                currentlyEditingItem.dataset.type = type;
+                currentlyEditingItem.dataset.date = date;
+                currentlyEditingItem.dataset.category = category;
+                currentlyEditingItem.dataset.source = source;
+                delete currentlyEditingItem.dataset.isInstallment;
+                delete currentlyEditingItem.dataset.installmentNumber;
+                delete currentlyEditingItem.dataset.totalInstallments;
+                showToast(successMessage, "success");
+            }
         }
 
         saveTransactions();
@@ -842,7 +963,7 @@ function filterTransactions() {
     monthlyIncomeEl.textContent = monthlyIncome.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyExpensesEl.textContent = monthlyExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     monthlyBalanceEl.textContent = monthlyBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    monthlyBalanceEl.className = 'h5 mb-0 ' + (monthlyBalance < 0 ? 'text-danger' : 'text-success');
+    monthlyBalanceEl.className = 'h4 mb-0 fw-bold ' + (monthlyBalance < 0 ? 'text-danger' : 'text-success');
     
     // Calcular saldos separados por fonte
     let cardIncome = 0, cardExpenses = 0;
@@ -870,19 +991,53 @@ function filterTransactions() {
     const cardBalance = cardIncome - cardExpenses;
     const cashBalance = cashIncome - cashExpenses;
     
+    // Atualizar despesas separadas
+    const cardExpensesEl = document.getElementById('card-expenses');
+    const cashExpensesEl = document.getElementById('cash-expenses');
+    if (cardExpensesEl) {
+        cardExpensesEl.textContent = cardExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    if (cashExpensesEl) {
+        cashExpensesEl.textContent = cashExpenses.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    }
+    
     // Atualizar saldos separados
     const cardBalanceEl = document.getElementById('card-balance');
     const cardAvailableEl = document.getElementById('card-available');
+    const cardAvailableDetailEl = document.getElementById('card-available-detail');
     const cashBalanceEl = document.getElementById('cash-balance');
     const cashAvailableEl = document.getElementById('cash-available');
+    
+    // Carregar meta de economia para calcular saldo disponível
+    const savingsGoal = loadFromStorage(STORAGE_KEYS.SAVINGS_GOAL, 0);
+    const availableBalance = Math.max(0, cardBalance - savingsGoal);
     
     if (cardBalanceEl) {
         cardBalanceEl.textContent = cardBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         cardBalanceEl.className = 'h4 mb-1 ' + (cardBalance >= 0 ? 'text-success' : 'text-danger');
     }
     if (cardAvailableEl) {
-        cardAvailableEl.textContent = cardBalance >= 0 ? 'Disponível no cartão' : 'Limite ultrapassado';
-        cardAvailableEl.className = cardBalance >= 0 ? 'text-success' : 'text-danger';
+        if (cardBalance < 0) {
+            cardAvailableEl.textContent = 'Limite ultrapassado';
+            cardAvailableEl.className = 'text-danger';
+        } else if (savingsGoal > 0) {
+            cardAvailableEl.textContent = `Disponível: ${availableBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
+            cardAvailableEl.className = availableBalance > 0 ? 'text-success' : 'text-warning';
+        } else {
+            cardAvailableEl.textContent = 'Disponível no cartão';
+            cardAvailableEl.className = 'text-success';
+        }
+    }
+    
+    // Mostrar detalhe do saldo (saldo total vs disponível)
+    if (cardAvailableDetailEl && savingsGoal > 0 && cardBalance >= 0) {
+        if (availableBalance > 0) {
+            cardAvailableDetailEl.innerHTML = `<small class="text-muted">Meta: ${savingsGoal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</small>`;
+        } else {
+            cardAvailableDetailEl.innerHTML = `<small class="text-warning">Meta já atingida!</small>`;
+        }
+    } else if (cardAvailableDetailEl) {
+        cardAvailableDetailEl.innerHTML = '';
     }
     
     if (cashBalanceEl) {
@@ -894,8 +1049,12 @@ function filterTransactions() {
         cashAvailableEl.className = cashBalance >= 0 ? 'text-info' : 'text-danger';
     }
     
+    // Calcular gasto semanal permitido até fechamento da fatura (dia 03)
+    // Considerando a meta de economia (quanto deve sobrar)
+    updateWeeklyBudget(cardBalance, savingsGoal, transactions);
+    
     // Atualizar meta de economia e saúde financeira
-    updateSavingsGoal(monthlyBalance);
+    updateSavingsGoal(monthlyBalance, cardBalance);
     updateFinancialHealth(monthlyIncome, monthlyExpenses, monthlyBalance);
     
     // Atualizar resumo do mês
@@ -1000,10 +1159,12 @@ function setupFinanceActionListeners() {
 
     list.addEventListener('click', (event) => {
         const target = event.target;
-        const item = target.closest('.list-group-item');
+        const item = target.closest('.transaction-item');
         if (!item) return;
 
-        if (target.closest('.delete-btn')) {
+        // Verificar se o clique foi em um botão de deletar
+        const deleteBtn = target.closest('.delete-btn');
+        if (deleteBtn) {
             // guardar para desfazer
             const deleted = {
                 id: item.dataset.id,
@@ -1038,29 +1199,136 @@ function setupFinanceActionListeners() {
                     showToast('Transação restaurada.', 'success');
                 }
             });
+            return; // Importante: retornar após processar o delete
         }
-        if (target.closest('.edit-btn')) {
-            if (item.dataset.isInstallment === 'true') {
-                showToast("Não é possível editar uma parcela individualmente.", "warning");
-                return;
-            }
+        
+        // Verificar se o clique foi em um botão de editar
+        const editBtn = target.closest('.edit-btn');
+        if (editBtn) {
+            event.preventDefault(); // Prevenir comportamento padrão
             currentlyEditingItem = item;
-            const { description, amount, type, date, category } = item.dataset;
-            document.getElementById('finance-description').value = description;
-            document.getElementById('finance-amount').value = amount;
-            document.getElementById('finance-type').value = type;
-            document.getElementById('finance-date').value = date;
-            document.getElementById('finance-category').value = category;
-            if (sourceInput) {
-                sourceInput.value = item.dataset.source || 'Cartão';
+            currentlyEditingInstallments = []; // Resetar array de parcelas
+            
+            // Se for uma parcela, encontrar todas as parcelas relacionadas
+            if (item.dataset.isInstallment === 'true') {
+                const installmentNumber = parseInt(item.dataset.installmentNumber);
+                const totalInstallments = parseInt(item.dataset.totalInstallments);
+                const descriptionBase = item.dataset.description.replace(/\s*\(\d+\/\d+\)$/, ''); // Remove (X/Y) do final
+                const itemDate = new Date(item.dataset.date + 'T00:00:00');
+                
+                // Encontrar todas as parcelas relacionadas
+                // Usar descrição base + número total de parcelas + data próxima (dentro de 1 ano)
+                const allItems = Array.from(list.querySelectorAll('.transaction-item'));
+                const relatedInstallments = allItems.filter(li => {
+                    if (li.dataset.isInstallment !== 'true') return false;
+                    const liDescriptionBase = li.dataset.description.replace(/\s*\(\d+\/\d+\)$/, '');
+                    const liTotalInstallments = parseInt(li.dataset.totalInstallments);
+                    const liDate = new Date(li.dataset.date + 'T00:00:00');
+                    
+                    // Verificar se é a mesma descrição base e mesmo número de parcelas
+                    if (liDescriptionBase !== descriptionBase || liTotalInstallments !== totalInstallments) {
+                        return false;
+                    }
+                    
+                    // Verificar se a data está próxima (dentro de um intervalo razoável)
+                    // Considerar que as parcelas podem estar em meses diferentes
+                    const monthsDiff = Math.abs((liDate.getFullYear() - itemDate.getFullYear()) * 12 + 
+                                                 (liDate.getMonth() - itemDate.getMonth()));
+                    return monthsDiff < totalInstallments + 1; // Permitir até totalInstallments meses de diferença
+                });
+                
+                currentlyEditingInstallments = relatedInstallments;
+                
+                // Preencher formulário com dados da primeira parcela (ou da parcela clicada)
+                const firstInstallment = relatedInstallments[0];
+                const { description, amount, type, date, category } = firstInstallment.dataset;
+                
+                // Extrair descrição base (sem número da parcela)
+                document.getElementById('finance-description').value = descriptionBase;
+                
+                // Calcular valor total (soma de todas as parcelas)
+                const totalAmount = relatedInstallments.reduce((sum, inst) => {
+                    return sum + parseFloat(inst.dataset.amount);
+                }, 0);
+                document.getElementById('finance-amount').value = totalAmount.toFixed(2);
+                
+                document.getElementById('finance-type').value = type;
+                document.getElementById('finance-date').value = date;
+                document.getElementById('finance-category').value = category;
+                
+                // Habilitar checkbox de parcelas e preencher número de parcelas
+                const recurringCheckbox = document.getElementById('recurring-checkbox');
+                const recurringOptions = document.getElementById('recurring-options');
+                const installmentTotalInput = document.getElementById('installment-total');
+                const typeInput = document.getElementById('finance-type');
+                const sourceInput = document.getElementById('finance-source');
+                const transactionModalEl = document.getElementById('transaction-modal');
+                
+                if (recurringCheckbox) {
+                    recurringCheckbox.checked = true;
+                    if (recurringOptions) recurringOptions.style.display = 'block';
+                    if (installmentTotalInput) {
+                        installmentTotalInput.value = totalInstallments;
+                    }
+                    if (typeInput) typeInput.disabled = true; // Parcelas são sempre despesas
+                }
+                
+                if (sourceInput) {
+                    sourceInput.value = firstInstallment.dataset.source || 'Cartão';
+                }
+                
+                const submitButton = document.getElementById('submit-btn');
+                const modalTitle = document.getElementById('modal-title');
+                if (modalTitle) modalTitle.textContent = `Editar Compra Parcelada (${totalInstallments} parcelas)`;
+                if (submitButton) {
+                    submitButton.textContent = "Salvar Alterações";
+                    submitButton.classList.remove('btn-primary');
+                    submitButton.classList.add('btn-success');
+                }
+                if (transactionModalEl) {
+                    const modal = bootstrap.Modal.getInstance(transactionModalEl) || new bootstrap.Modal(transactionModalEl);
+                    modal.show();
+                }
+            } else {
+                // Edição normal de transação única
+                currentlyEditingInstallments = [];
+                const { description, amount, type, date, category } = item.dataset;
+                document.getElementById('finance-description').value = description;
+                document.getElementById('finance-amount').value = amount;
+                document.getElementById('finance-type').value = type;
+                document.getElementById('finance-date').value = date;
+                document.getElementById('finance-category').value = category;
+                
+                const sourceInput = document.getElementById('finance-source');
+                const recurringCheckbox = document.getElementById('recurring-checkbox');
+                const recurringOptions = document.getElementById('recurring-options');
+                const typeInput = document.getElementById('finance-type');
+                const transactionModalEl = document.getElementById('transaction-modal');
+                
+                if (sourceInput) {
+                    sourceInput.value = item.dataset.source || 'Cartão';
+                }
+                
+                // Garantir que checkbox de parcelas está desmarcado
+                if (recurringCheckbox) {
+                    recurringCheckbox.checked = false;
+                    if (recurringOptions) recurringOptions.style.display = 'none';
+                    if (typeInput) typeInput.disabled = false;
+                }
+                
+                const submitButton = document.getElementById('submit-btn');
+                const modalTitle = document.getElementById('modal-title');
+                if (modalTitle) modalTitle.textContent = "Editar Transação";
+                if (submitButton) {
+                    submitButton.textContent = "Salvar Alterações";
+                    submitButton.classList.remove('btn-primary');
+                    submitButton.classList.add('btn-success');
+                }
+                if (transactionModalEl) {
+                    const modal = bootstrap.Modal.getInstance(transactionModalEl) || new bootstrap.Modal(transactionModalEl);
+                    modal.show();
+                }
             }
-            const submitButton = document.getElementById('submit-btn');
-            const modalTitle = document.getElementById('modal-title');
-            modalTitle.textContent = "Editar Transação";
-            submitButton.textContent = "Salvar Alterações";
-            submitButton.classList.remove('btn-primary');
-            submitButton.classList.add('btn-success');
-            transactionModal.show();
         }
     });
 }
@@ -1302,7 +1570,7 @@ function createRecurringTransactions(transaction, frequency) {
 }
 
 // Função para atualizar meta de economia
-function updateSavingsGoal(monthlyBalance) {
+function updateSavingsGoal(monthlyBalance, cardBalance) {
     const savingsGoalEl = document.getElementById('savings-goal');
     const savingsProgressEl = document.getElementById('savings-progress');
     const savingsStatusEl = document.getElementById('savings-status');
@@ -1319,18 +1587,21 @@ function updateSavingsGoal(monthlyBalance) {
     }
     
     savingsGoalEl.textContent = savingsGoal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-    const progress = Math.min((monthlyBalance / savingsGoal) * 100, 100);
+    
+    // A meta é quanto deve sobrar do salário (cartão)
+    // Progresso baseado no saldo do cartão
+    const progress = Math.min((cardBalance / savingsGoal) * 100, 100);
     savingsProgressEl.style.width = `${Math.max(0, progress)}%`;
     
-    if (monthlyBalance >= savingsGoal) {
+    if (cardBalance >= savingsGoal) {
         savingsProgressEl.className = 'progress-bar bg-success';
         savingsStatusEl.textContent = '✅ Meta atingida!';
         savingsStatusEl.className = 'text-success';
     } else {
-        const remaining = savingsGoal - monthlyBalance;
-        savingsProgressEl.className = monthlyBalance >= savingsGoal * 0.75 ? 'progress-bar bg-warning' : 'progress-bar bg-danger';
+        const remaining = savingsGoal - cardBalance;
+        savingsProgressEl.className = cardBalance >= savingsGoal * 0.75 ? 'progress-bar bg-warning' : 'progress-bar bg-danger';
         savingsStatusEl.textContent = `Faltam ${remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`;
-        savingsStatusEl.className = monthlyBalance >= savingsGoal * 0.75 ? 'text-warning' : 'text-danger';
+        savingsStatusEl.className = cardBalance >= savingsGoal * 0.75 ? 'text-warning' : 'text-danger';
     }
 }
 
@@ -1511,4 +1782,171 @@ function updateMonthSummary(monthlyBalance) {
     monthSummaryEl.className = 'h6 mb-1 ' + (monthlyBalance >= 0 ? 'text-success' : 'text-danger');
     monthSummaryStatusEl.textContent = monthlyBalance >= 0 ? 'Saldo positivo' : 'Saldo negativo';
     monthSummaryStatusEl.className = monthlyBalance >= 0 ? 'text-success' : 'text-danger';
+}
+
+// Função para calcular e atualizar gasto semanal permitido até fechamento da fatura
+function updateWeeklyBudget(cardBalance, savingsGoal, transactions) {
+    const weeklyBudgetEl = document.getElementById('weekly-budget');
+    const weeklyInfoEl = document.getElementById('weekly-info');
+    const daysUntilClosingEl = document.getElementById('days-until-closing');
+    
+    if (!weeklyBudgetEl || !weeklyInfoEl || !daysUntilClosingEl) return;
+    
+    // Dia de fechamento da fatura (dia 03)
+    const closingDay = 3;
+    const today = new Date();
+    const currentDay = today.getDate();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    
+    // Calcular próxima data de fechamento
+    let nextClosingDate = new Date(currentYear, currentMonth, closingDay);
+    
+    // Se já passou o dia 03 deste mês, próxima data é dia 03 do próximo mês
+    if (currentDay > closingDay) {
+        nextClosingDate = new Date(currentYear, currentMonth + 1, closingDay);
+    }
+    
+    // Calcular dias até o fechamento
+    const daysUntilClosing = Math.ceil((nextClosingDate - today) / (1000 * 60 * 60 * 24));
+    
+    // Calcular semanas completas (arredondar para baixo)
+    const weeksUntilClosing = Math.floor(daysUntilClosing / 7);
+    
+    // Se não há semanas completas, usar pelo menos 1 semana
+    const weeksToUse = Math.max(1, weeksUntilClosing);
+    
+    // Calcular saldo disponível para gastar (saldo - meta de economia)
+    // A meta é quanto deve SOBRAR, então o disponível é o saldo menos a meta
+    const availableBalance = Math.max(0, cardBalance - savingsGoal);
+    
+    // Calcular gasto semanal permitido
+    // Dividir o saldo disponível pelo número de semanas até o fechamento
+    let weeklyBudget = 0;
+    if (availableBalance > 0 && weeksToUse > 0) {
+        weeklyBudget = availableBalance / weeksToUse;
+    }
+    
+    // Calcular início e fim da semana atual (domingo a sábado)
+    const todayDayOfWeek = today.getDay(); // 0 = domingo, 6 = sábado
+    const daysFromSunday = todayDayOfWeek; // Quantos dias desde domingo
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - daysFromSunday);
+    weekStart.setHours(0, 0, 0, 0);
+    
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+    
+    // Calcular gastos da semana atual (apenas despesas do cartão)
+    let weeklySpent = 0;
+    transactions.forEach(transaction => {
+        const transactionDate = new Date(transaction.dataset.date + 'T00:00:00');
+        const source = transaction.dataset.source || 'Cartão';
+        const type = transaction.dataset.type;
+        const amount = parseFloat(transaction.dataset.amount);
+        
+        // Se for despesa do cartão e estiver na semana atual
+        if (source === 'Cartão' && type === 'Despesa' && 
+            transactionDate >= weekStart && transactionDate <= weekEnd) {
+            weeklySpent += amount;
+        }
+    });
+    
+    // Calcular quanto ainda pode gastar nesta semana
+    const weeklyRemaining = weeklyBudget - weeklySpent;
+    
+    // Elementos adicionais
+    const weeklySpentEl = document.getElementById('weekly-spent');
+    const weeklyRemainingEl = document.getElementById('weekly-remaining');
+    
+    // Atualizar elementos
+    if (cardBalance <= 0) {
+        weeklyBudgetEl.textContent = 'R$ 0,00';
+        weeklyBudgetEl.className = 'h3 mb-1 text-danger';
+        weeklyInfoEl.textContent = 'Saldo insuficiente';
+        if (weeklySpentEl) weeklySpentEl.textContent = 'R$ 0,00';
+        if (weeklyRemainingEl) {
+            weeklyRemainingEl.textContent = 'R$ 0,00 restantes';
+            weeklyRemainingEl.className = 'h4 mb-1 text-danger';
+        }
+        daysUntilClosingEl.textContent = `${daysUntilClosing} dias até fechamento`;
+        daysUntilClosingEl.className = 'badge bg-danger';
+    } else if (availableBalance <= 0) {
+        weeklyBudgetEl.textContent = 'R$ 0,00';
+        weeklyBudgetEl.className = 'h3 mb-1 text-warning';
+        weeklyInfoEl.textContent = `Meta de economia já atingida`;
+        if (weeklySpentEl) weeklySpentEl.textContent = 'R$ 0,00';
+        if (weeklyRemainingEl) {
+            weeklyRemainingEl.textContent = 'R$ 0,00 restantes';
+            weeklyRemainingEl.className = 'h4 mb-1 text-warning';
+        }
+        daysUntilClosingEl.textContent = `${daysUntilClosing} dias até fechamento`;
+        daysUntilClosingEl.className = 'badge bg-success';
+    } else {
+        // Mostrar orçamento semanal
+        weeklyBudgetEl.textContent = weeklyBudget.toLocaleString('pt-BR', { 
+            style: 'currency', 
+            currency: 'BRL',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        weeklyBudgetEl.className = 'h3 mb-1 text-warning';
+        
+        // Formatar data do sábado da semana atual
+        const weekEndFormatted = weekEnd.toLocaleDateString('pt-BR', { 
+            weekday: 'long', 
+            day: 'numeric', 
+            month: 'long' 
+        });
+        
+        weeklyInfoEl.textContent = `Esta semana (até ${weekEndFormatted.charAt(0).toUpperCase() + weekEndFormatted.slice(1)})`;
+        
+        // Mostrar gastos da semana
+        if (weeklySpentEl) {
+            weeklySpentEl.textContent = weeklySpent.toLocaleString('pt-BR', { 
+                style: 'currency', 
+                currency: 'BRL',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+            weeklySpentEl.className = 'h5 mb-1 ' + (weeklySpent > 0 ? 'text-danger' : 'text-muted');
+        }
+        
+        // Mostrar quanto ainda pode gastar
+        if (weeklyRemainingEl) {
+            if (weeklyRemaining >= 0) {
+                weeklyRemainingEl.textContent = `${weeklyRemaining.toLocaleString('pt-BR', { 
+                    style: 'currency', 
+                    currency: 'BRL',
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                })} restantes`;
+                weeklyRemainingEl.className = 'h4 mb-1 text-success';
+            } else {
+                // Passou do limite - mostrar negativo
+                const exceeded = Math.abs(weeklyRemaining);
+                weeklyRemainingEl.textContent = `${exceeded.toLocaleString('pt-BR', { 
+                    style: 'currency', 
+                    currency: 'BRL',
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                })} acima do limite`;
+                weeklyRemainingEl.className = 'h4 mb-1 text-danger';
+            }
+        }
+        
+        // Badge com informações detalhadas
+        const badgeText = `${weeksToUse} semana${weeksToUse > 1 ? 's' : ''} até fechamento (dia ${closingDay}/${nextClosingDate.getMonth() + 1})`;
+        if (daysUntilClosing <= 7) {
+            daysUntilClosingEl.textContent = badgeText;
+            daysUntilClosingEl.className = 'badge bg-warning';
+        } else if (daysUntilClosing <= 14) {
+            daysUntilClosingEl.textContent = badgeText;
+            daysUntilClosingEl.className = 'badge bg-info';
+        } else {
+            daysUntilClosingEl.textContent = badgeText;
+            daysUntilClosingEl.className = 'badge bg-success';
+        }
+    }
 }
